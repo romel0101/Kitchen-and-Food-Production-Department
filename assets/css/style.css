@@ -1,0 +1,321 @@
+.bg-dusky {
+    background-color: #E1B8AC;
+}
+
+.bg-khaki {
+    background-color: #F2EAE1;
+}
+
+.bg-cream {
+    background-color: #B59F6C;
+}
+
+/* Custom scrollbar for user profile box in header */
+.custom-scrollbar::-webkit-scrollbar {
+    height: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.05);
+    border-radius: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.3);
+}
+
+/* Sidebar collapsed state - Dynamic (CSS-based, works with JS toggle) */
+#sidebar.md\:w-20 .sidebar-nav-link:hover .sidebar-hover-label {
+    display: block;
+}
+
+#sidebar.md\:w-20 nav a {
+    justify-content: center;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+}
+
+/* Allow tooltip to overflow outside sidebar when collapsed */
+#sidebar.md\:w-20 {
+    overflow: visible !important;
+}
+
+/* Ensure nav and user profile don't clip tooltips when collapsed */
+#sidebar.md\:w-20 nav {
+    overflow: visible !important;
+}
+#sidebar.md\:w-20 .sidebar-user-profile {
+    overflow: visible !important;
+}
+
+/* Ensure mobile sidebar is full width and resets collapsed state */
+@media (max-width: 767px) {
+    #sidebar {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+    #sidebar.md\:w-20,
+    #sidebar.md\:w-64 {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+    /* Reset collapsed styles on mobile */
+    #sidebar.md\:w-20 .sidebar-nav-label,
+    #sidebar.md\:w-20 .sidebar-nav-count,
+    #sidebar.md\:w-20 .sidebar-section-title,
+    #sidebar.md\:w-20 .sidebar-header-title {
+        display: block !important;
+    }
+    #sidebar.md\:w-20 .sidebar-user-info,
+    #sidebar.md\:w-20 .sidebar-logout-btn {
+        display: block !important;
+    }
+    #sidebar.md\:w-20 .sidebar-nav-link {
+        justify-content: flex-start !important;
+    }
+    #sidebar.md\:w-20 .sidebar-user-container {
+        justify-content: flex-start !important;
+    }
+    /* Make sidebar scrollable on mobile */
+    #sidebar {
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+    }
+    /* Hide hover labels on mobile */
+    #sidebar.md\:w-20 .sidebar-hover-label {
+        display: none !important;
+    }
+}
+
+#sidebar.md\:w-20 .sidebar-nav-label,
+#sidebar.md\:w-20 .sidebar-nav-count,
+#sidebar.md\:w-20 .sidebar-section-title,
+#sidebar.md\:w-20 .sidebar-header-title {
+    display: none !important;
+}
+
+#sidebar.md\:w-20 .sidebar-user-profile {
+    display: block !important;
+}
+
+#sidebar.md\:w-20 .sidebar-collapsed-logo {
+    display: block !important;
+    position: relative;
+}
+
+#sidebar.md\:w-20 .sidebar-collapsed-logo:hover .sidebar-hover-label {
+    display: block !important;
+}
+
+#sidebar.md\:w-20 .sidebar-user-info {
+    display: none !important;
+}
+
+#sidebar.md\:w-20 .sidebar-logout-btn {
+    display: none !important;
+}
+
+#sidebar.md\:w-20 .sidebar-user-container {
+    justify-content: center;
+    padding: 0.75rem;
+}
+
+#sidebar.md\:w-20 .sidebar-user-container:hover .sidebar-hover-label {
+    display: block !important;
+}
+
+#sidebar.md\:w-20 .w-8.h-8 {
+    position: relative;
+}
+
+#sidebar.md\:w-20 .sidebar-nav-link:hover .sidebar-hover-label {
+    display: block !important;
+}
+
+#sidebar.md\:w-20 .w-8.h-8:hover .sidebar-hover-label {
+    display: block !important;
+}
+
+#sidebar {
+    transition: width 0.3s ease-in-out;
+}
+
+/* Ensure sidebar nav links center their icons when collapsed */
+#sidebar.md\:w-20 .sidebar-nav-link {
+    justify-content: center;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+}
+
+/* Print styles for reports page */
+@media print {
+    /* Hide sidebar, navbar, and interactive elements */
+    #sidebar,
+    #sidebarBackdrop,
+    header,
+    .print\:hidden,
+    form[method="GET"],
+    button,
+    a[href*="page=inventory"],
+    a[href*="page=orders"],
+    a[href*="page=recipes"],
+    a[href*="page=receiving"],
+    a[href*="page=expiry"],
+    a[href*="page=waste"],
+    a[href*="page=reports"],
+    a[href*="page=safety"],
+    a[href*="page=users"],
+    a[href*="page=user_activity"],
+    a[href*="page=dashboard"] {
+        display: none !important;
+    }
+
+    /* Reset layout for print */
+    body {
+        background: white !important;
+        color: black !important;
+        height: auto !important;
+        overflow: visible !important;
+    }
+
+    .flex-1 {
+        flex: 1 1 auto !important;
+        min-width: 0 !important;
+    }
+
+    main {
+        padding: 0 !important;
+        max-width: none !important;
+    }
+
+    /* Page sizing */
+    @page {
+        margin: 1cm;
+        size: A4 portrait;
+    }
+
+    /* Table improvements for print */
+    table {
+        page-break-inside: auto !important;
+        width: 100% !important;
+    }
+
+    tr {
+        page-break-inside: avoid !important;
+        page-break-after: auto !important;
+    }
+
+    thead {
+        display: table-header-group !important;
+    }
+
+    tbody {
+        display: table-row-group !important;
+    }
+
+    /* Hide shadows and rounded corners */
+    .shadow,
+    .shadow-sm,
+    .shadow-xl,
+    .rounded,
+    .rounded-lg,
+    .rounded-md,
+    .rounded-xl {
+        box-shadow: none !important;
+        border-radius: 0 !important;
+    }
+
+    /* Borders for tables */
+    .border,
+    .border-b,
+    .border-t,
+    .border-y,
+    .divide-y > * + * {
+        border-color: #ccc !important;
+    }
+
+    /* Background colors for print */
+    .bg-white,
+    .bg-slate-50,
+    .bg-slate-100,
+    .bg-amber-50,
+    .bg-red-50,
+    .bg-green-50,
+    .bg-blue-50 {
+        background: white !important;
+    }
+
+    .bg-slate-200,
+    .border-slate-200,
+    .border-slate-300 {
+        border-color: #e5e5e5 !important;
+    }
+
+    /* Text colors */
+    .text-slate-900,
+    .text-slate-800,
+    .text-slate-700,
+    .text-slate-600,
+    .text-slate-500,
+    .text-black {
+        color: #111 !important;
+    }
+
+    /* Badge styles for print */
+    .rounded-full,
+    .badge {
+        border: 1px solid #ccc !important;
+        background: #f5f5f5 !important;
+        color: #333 !important;
+        padding: 2px 6px !important;
+    }
+
+    /* Section spacing */
+    section {
+        page-break-inside: avoid !important;
+        margin-bottom: 1rem !important;
+    }
+
+    h2 {
+        border-bottom: 2px solid #333 !important;
+        padding-bottom: 0.25rem !important;
+        margin-top: 1.5rem !important;
+    }
+
+    /* Stats summary */
+    dl {
+        border: 1px solid #ccc !important;
+        padding: 0.75rem !important;
+        margin-bottom: 1rem !important;
+    }
+
+    dt {
+        color: #333 !important;
+    }
+
+    dd {
+        color: #111 !important;
+    }
+
+    /* Ensure tables don't get cut */
+    .overflow-x-auto {
+        overflow: visible !important;
+    }
+
+    /* Grid layout for print */
+    .grid {
+        display: block !important;
+    }
+
+    .lg\:grid-cols-2 > *,
+    .lg\:grid-cols-3 > *,
+    .lg\:grid-cols-4 > * {
+        width: 100% !important;
+    }
+
+    .gap-6 {
+        gap: 1rem !important;
+    }
+}

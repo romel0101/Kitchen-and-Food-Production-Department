@@ -1,0 +1,23 @@
+Options -Indexes
+DirectoryIndex index.php
+
+RewriteEngine On
+
+# Code and data folders are never served directly (config/db.php, database/*.sql, includes/*.php, sections/*.php).
+RewriteRule ^(config|includes|sections|database)(/|$) - [F,L]
+
+# Pretty URLs: /inventory -> index.php?page=inventory (index.php only loads pages from its own allowlist).
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^([a-zA-Z0-9_-]+)$ index.php?page=$1 [QSA,L]
+
+# Never serve database dumps, logs, notes or environment files.
+<FilesMatch "\.(sql|log|md|env|ini|bak|rar|zip)$">
+    Require all denied
+</FilesMatch>
+
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "same-origin"
+</IfModule>
