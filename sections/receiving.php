@@ -230,7 +230,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             return 'Batch #' . $batchId . ' deleted and total stock adjusted by -' . num($received) . ' ' . $unit . '.';
         });
     }
-    redirect($goBack);
+    if ($handled) {
+        redirect($goBack ?? $baseUrl);
+    }
 }
 
 // =====================================================================================================
