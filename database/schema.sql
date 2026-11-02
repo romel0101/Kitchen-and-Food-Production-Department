@@ -2,6 +2,9 @@ CREATE DATABASE IF NOT EXISTS hotel_kitchen CHARACTER SET utf8mb4 COLLATE utf8mb
 USE hotel_kitchen;
 SET NAMES utf8mb4;
 
+-- =============================================================================
+-- USERS & ROLES
+-- =============================================================================
 CREATE TABLE IF NOT EXISTS users (
     id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     username   VARCHAR(50)  NOT NULL UNIQUE,
@@ -15,6 +18,9 @@ INSERT IGNORE INTO users (username, password, role) VALUES
 ('chef',      '$2b$10$MX9f2sDNKhzHmxiUjPxjkeSlf1jFdDj3NggQnqxtGCoTzYR44BIxW', 'C'),
 ('inventory', '$2b$10$MX9f2sDNKhzHmxiUjPxjkeSlf1jFdDj3NggQnqxtGCoTzYR44BIxW', 'I');
 
+-- =============================================================================
+-- MENU & RECIPES
+-- =============================================================================
 CREATE TABLE IF NOT EXISTS menu_items (
     id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     name       VARCHAR(120) NOT NULL UNIQUE,
@@ -43,28 +49,15 @@ CREATE TABLE IF NOT EXISTS recipe_ingredients (
     menu_item_id      INT UNSIGNED NOT NULL,
     ingredient_id     INT UNSIGNED NOT NULL,
     quantity_required DECIMAL(10,3) NOT NULL,
-    unit              VARCHAR(20)   NULL,      -- unit the recipe is written in (kg/g, L/mL, pcs...); NULL = the ingredient's own unit
+    unit              VARCHAR(20)   NULL,      -- recipe's own unit (pcs, g, mL...); NULL = ingredient's unit
     UNIQUE KEY uq_recipe (menu_item_id, ingredient_id),
     FOREIGN KEY (menu_item_id)  REFERENCES menu_items(id)  ON DELETE CASCADE,
     FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ---------------------------------------------------------------------------------------------
--- POS integration: the POS shares this database and writes straight into `orders` and
--- `order_items`. There is no API. For each ticket, do both inserts in ONE transaction so the
--- kitchen never sees a ticket without its dishes:
---
---   1. INSERT INTO orders (order_number, pos_order_id, order_type, table_number, customer_name)
---        order_number  the ticket number shown in the kitchen (must be unique)
---        order_type    for example 'Dine-In', 'Room Service' or 'Takeout'
---        table_number  table or room, may be NULL
---      Do NOT set created_at or ready_at. The database stamps created_at on insert, and the
---      kitchen queue is first come, first served on it. The kitchen sets ready_at when done.
---
---   2. INSERT INTO order_items (order_id, menu_item_id, item_name, quantity, special_instructions)
---        one row per dish; order_id is the id of the row from step 1; menu_item_id comes from
---        menu_items (it may be NULL for a dish the kitchen menu does not know).
--- ---------------------------------------------------------------------------------------------
+-- =============================================================================
+-- POS INTEGRATION (orders & order_items)
+-- =============================================================================
 CREATE TABLE IF NOT EXISTS orders (
     id                      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     order_number            VARCHAR(64)  NOT NULL,
@@ -74,7 +67,6 @@ CREATE TABLE IF NOT EXISTS orders (
     customer_name           VARCHAR(100) NOT NULL,
     created_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     ready_at                TIMESTAMP NULL,
-    
     KEY idx_queue (created_at, id),
     UNIQUE KEY uq_pos_ticket_line (order_number)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -89,12 +81,13 @@ CREATE TABLE IF NOT EXISTS order_items (
     special_instructions    VARCHAR(255) NULL,
     created_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
-    
     FOREIGN KEY (menu_item_id) REFERENCES menu_items(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- =============================================================================
+-- INVENTORY: BATCH RECEIPTS, USAGE, WASTE, STOCK MOVEMENTS (AUDIT LEDGER)
+-- =============================================================================
 CREATE TABLE IF NOT EXISTS stock_receipts (
     id                 INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     ingredient_id      INT UNSIGNED NOT NULL,
@@ -124,8 +117,8 @@ CREATE TABLE IF NOT EXISTS usage_logs (
 CREATE TABLE IF NOT EXISTS waste_logs (
     id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     ingredient_id INT UNSIGNED NOT NULL,
+    batch_id      INT UNSIGNED NULL,   -- exact batch the waste came from (NULL for legacy/FIFO rows)
     current_stock DECIMAL(10,3) NOT NULL,
-    batch_id      INT UNSIGNED NULL,   -- the batch the waste came out of (NULL for old rows / FIFO waste)
     reason        ENUM('spoiled','damaged','expired','unused','other') NOT NULL,
     notes         VARCHAR(255) NULL,
     logged_by     INT UNSIGNED NOT NULL,
@@ -136,9 +129,9 @@ CREATE TABLE IF NOT EXISTS waste_logs (
     FOREIGN KEY (logged_by)     REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Audit ledger: one row for every change to stock (receiving, waste, batch edits, kitchen usage, write-offs).
--- quantity_change = the signed change to the ingredient's global current_stock.
--- stock_after     = the ingredient's current_stock right after the change (NULL on back-filled history).
+-- Audit ledger: one row per stock change (receive, waste, batch_edit, usage, write_off).
+-- quantity_change = signed change to ingredient's global current_stock.
+-- stock_after     = ingredient's current_stock after the change (NULL for back-filled history).
 CREATE TABLE IF NOT EXISTS stock_movements (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     ingredient_id   INT UNSIGNED NOT NULL,
@@ -155,6 +148,22 @@ CREATE TABLE IF NOT EXISTS stock_movements (
     FOREIGN KEY (created_by)    REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Back-fill history for new installs (safe to run anytime; duplicates are prevented by PK)
+INSERT IGNORE INTO stock_movements (ingredient_id, batch_id, movement_type, quantity_change, details, created_by, created_at)
+SELECT ingredient_id, id, 'receive', current_stock,
+       CONCAT_WS(' | ', supplier, invoice_number, notes), received_by, received_at
+FROM stock_receipts;
+
+INSERT IGNORE INTO stock_movements (ingredient_id, movement_type, quantity_change, details, created_by, created_at)
+SELECT ingredient_id,
+       IF(notes LIKE 'Written off from expiry tracking%', 'write_off', 'waste'),
+       -current_stock,
+       CONCAT_WS(' | ', reason, notes), logged_by, logged_at
+FROM waste_logs;
+
+-- =============================================================================
+-- FOOD SAFETY LOGS
+-- =============================================================================
 CREATE TABLE IF NOT EXISTS safety_logs (
     id        INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     log_type  ENUM('temperature','sanitation') NOT NULL,
@@ -166,4 +175,20 @@ CREATE TABLE IF NOT EXISTS safety_logs (
     logged_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_logged_at (logged_at),
     FOREIGN KEY (logged_by) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================================================
+-- USER ACTIVITY LOG
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS user_activity_log (
+    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id         INT UNSIGNED NOT NULL,
+    activity_type   VARCHAR(50)  NOT NULL,          -- login, logout, create, update, delete, view, export
+    description     VARCHAR(255) NOT NULL,
+    ip_address      VARCHAR(45)  NULL,
+    user_agent      VARCHAR(255) NULL,
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_user_time (user_id, created_at, id),
+    INDEX idx_type_time (activity_type, created_at),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
