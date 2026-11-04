@@ -64,7 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     redirect('index.php?page=safety');
 }
 
-$recent = $pdo->query('SELECT s.logged_at, s.log_type, s.subject, s.reading, s.passed, s.notes, u.username
+$recent = $pdo->query('SELECT s.logged_at, s.log_type, s.subject, s.reading, s.passed, s.notes, u.first_name, u.middle_name, u.last_name, u.suffix
                        FROM safety_logs s JOIN users u ON u.id = s.logged_by
                        ORDER BY s.logged_at DESC, s.id DESC LIMIT 30')->fetchAll();
 $t = $pdo->query('SELECT COUNT(*) AS total, COALESCE(SUM(passed = 0), 0) AS failed FROM safety_logs WHERE logged_at >= CURDATE()')->fetch();
@@ -127,7 +127,7 @@ $pageTitle = 'Food safety logs';
                     <td class="tabular-nums"><?= $r['reading'] !== null ? e(num($r['reading'], 1)) . ' °C' : '' ?></td>
                     <td><?= $r['passed'] ? badge('Pass', 'green') : badge('Fail', 'red') ?></td>
                     <td class="max-w-xs text-slate-600"><?= e($r['notes'] ?? '') ?></td>
-                    <td><?= e($r['username']) ?></td>
+                    <td><?php $fn = trim(implode(' ', array_filter([$r['first_name'], $r['middle_name'], $r['last_name'], $r['suffix']]))); echo e($fn ?: '—'); ?></td>
                 </tr>
             <?php endforeach; ?>
             <?php if (!$recent): ?><tr><td colspan="7" class="px-4 py-8 text-center text-slate-500">No checks logged yet.</td></tr><?php endif; ?>

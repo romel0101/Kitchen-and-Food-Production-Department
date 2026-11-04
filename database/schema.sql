@@ -6,17 +6,27 @@ SET NAMES utf8mb4;
 -- USERS & ROLES
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS users (
-    id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    username   VARCHAR(50)  NOT NULL UNIQUE,
-    password   VARCHAR(255) NOT NULL,
-    role       ENUM('A','C','I') NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    email           VARCHAR(150)  NOT NULL UNIQUE,
+    password        VARCHAR(255) NOT NULL,
+    role            ENUM('A','C','I') NOT NULL,
+    first_name      VARCHAR(50)  NULL,
+    middle_name     VARCHAR(50)  NULL,
+    last_name       VARCHAR(50)  NULL,
+    suffix          VARCHAR(10)  NULL,
+    age             INT UNSIGNED NULL,
+    birthdate       DATE         NULL,
+    address         VARCHAR(255) NULL,
+    contact_number  VARCHAR(25)  NULL,
+    created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    last_login      TIMESTAMP    NULL DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT IGNORE INTO users (username, password, role) VALUES
-('admin',     '$2b$10$MX9f2sDNKhzHmxiUjPxjkeSlf1jFdDj3NggQnqxtGCoTzYR44BIxW', 'A'),
-('chef',      '$2b$10$MX9f2sDNKhzHmxiUjPxjkeSlf1jFdDj3NggQnqxtGCoTzYR44BIxW', 'C'),
-('inventory', '$2b$10$MX9f2sDNKhzHmxiUjPxjkeSlf1jFdDj3NggQnqxtGCoTzYR44BIxW', 'I');
+INSERT IGNORE INTO users (email, password, role, first_name, middle_name, last_name, age, birthdate, address, contact_number) VALUES
+('admin@hotel.local',     '$2b$10$MX9f2sDNKhzHmxiUjPxjkeSlf1jFdDj3NggQnqxtGCoTzYR44BIxW', 'A', 'Juan', 'Dela', 'Cruz', 30, '1993-01-15', '123 Main St, Cityville', '09123456789'),
+('chef@hotel.local',      '$2b$10$MX9f2sDNKhzHmxiUjPxjkeSlf1jFdDj3NggQnqxtGCoTzYR44BIxW', 'C', 'Master', 'Chef', 'chef@hotel.local', 40, '1983-05-20', '456 Culinary Ave, Foodtown', '09234567890'),
+('inventory@hotel.local', '$2b$10$MX9f2sDNKhzHmxiUjPxjkeSlf1jFdDj3NggQnqxtGCoTzYR44BIxW', 'I', 'Stock', 'Manager', 'inventory@hotel.local', 35, '1988-03-10', '789 Supply Rd, Storagetown', '09345678901');
 
 -- =============================================================================
 -- MENU & RECIPES

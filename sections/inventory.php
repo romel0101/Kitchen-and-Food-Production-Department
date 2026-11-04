@@ -517,7 +517,9 @@ $pageTitle = 'Inventory';
                             <td class="px-6 py-4 text-right space-x-2 whitespace-nowrap">
                                 <a href="index.php?page=receiving&ingredient=<?= (int) $r['id'] ?>" class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors shadow-sm">Receive / Batches</a>
                                 <a href="index.php?page=inventory&action=edit&id=<?= (int) $r['id'] ?>" class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors shadow-sm">Edit</a>
-                                <button type="button" class="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100 transition-colors shadow-sm" onclick="openDeleteModal('<?= e(addslashes($r['name'])) ?>', <?= (int)$r['id'] ?>)">Delete</button>
+                                <?php if ($_SESSION['role'] === ROLE_ADMIN): ?>
+                                    <button type="button" class="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100 transition-colors shadow-sm" onclick="openDeleteModal('<?= e(addslashes($r['name'])) ?>', <?= (int)$r['id'] ?>)">Delete</button>
+                                <?php endif; ?>
                             </td>
                         </tr>
                     <?php endforeach; ?>

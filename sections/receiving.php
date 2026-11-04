@@ -248,7 +248,7 @@ if ($editId) {
     foreach ($stockBatches as $row) if ((int) $row['id'] === $editId) { $editBatch = $row; break; }
 }
 
-$m = $pdo->prepare('SELECT m.*, u.username FROM stock_movements m LEFT JOIN users u ON u.id = m.created_by
+$m = $pdo->prepare('SELECT m.*, u.first_name, u.middle_name, u.last_name, u.suffix FROM stock_movements m LEFT JOIN users u ON u.id = m.created_by
                     WHERE m.ingredient_id = :id ORDER BY m.created_at DESC, m.id DESC LIMIT 25');
 $m->execute([':id' => $ingredientId]);
 $recentMovements = $m->fetchAll();
@@ -518,7 +518,7 @@ $lblCls   = 'block text-xs font-bold uppercase tracking-wider text-slate-500 mb-
                             <?= ($chg > 0 ? '+' : '') . e(num($chg)) ?>
                         </td>
                         <td class="px-6 py-3 tabular-nums text-slate-600"><?= $mv['stock_after'] !== null ? e(num($mv['stock_after'])) : '—' ?></td>
-                        <td class="px-6 py-3 text-slate-600"><?= e($mv['username'] ?? '—') ?></td>
+                        <td class="px-6 py-3 text-slate-600"><?php $fn = trim(implode(' ', array_filter([$mv['first_name'], $mv['middle_name'], $mv['last_name'], $mv['suffix']]))); echo e($fn ?: '—'); ?></td>
                         <td class="px-6 py-3 text-slate-500"><?= e($mv['details'] ?? '') ?></td>
                     </tr>
                 <?php endforeach; ?>

@@ -28,7 +28,7 @@ const ROLE_LABELS = [ROLE_ADMIN => 'Admin', ROLE_CHEF => 'Chef Staff', ROLE_INVE
 const PERMISSIONS = [
     ROLE_ADMIN     => ['orders', 'recipes', 'inventory', 'receiving', 'expiry', 'waste', 'safety', 'reports', 'users'],
     ROLE_CHEF      => ['orders', 'recipes'],
-    ROLE_INVENTORY => ['inventory', 'receiving', 'expiry'],
+    ROLE_INVENTORY => ['dashboard', 'inventory', 'receiving', 'expiry', 'waste', 'safety', 'reports'],
 ];
 
 // ---- Business rules you can tune ----

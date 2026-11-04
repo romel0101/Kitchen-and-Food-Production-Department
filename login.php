@@ -9,18 +9,18 @@ if (isset($_SESSION['user_id'], $_SESSION['role']) && array_key_exists($_SESSION
 }
 
 $error    = '';
-$username = '';
+$email = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     check_csrf();
-    $username = trim($_POST['username'] ?? '');
+    $email = trim($_POST['email'] ?? ''); // This will now be the email
     $password = (string) ($_POST['password'] ?? '');
 
-    if ($username === '' || $password === '') {
-        $error = 'Enter both your username and password.';
+    if ($email === '' || $password === '') {
+        $error = 'Enter both your email and password.';
     } else {
-        $stmt = $pdo->prepare('SELECT id, username, password, role FROM users WHERE username = :username LIMIT 1');
-        $stmt->execute([':username' => $username]);
+        $stmt = $pdo->prepare('SELECT id, email, password, role FROM users WHERE email = :email LIMIT 1');
+        $stmt->execute([':email' => $email]);
         $user = $stmt->fetch();
 
         $passwordOk = password_verify($password, $user['password'] ?? DUMMY_HASH);
@@ -32,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 session_regenerate_id(true);
                 $_SESSION = [
                     'user_id'  => (int) $user['id'],
-                    'username' => $user['username'],
+                    'email' => $user['email'],
                     'role'     => $user['role'],
                     'csrf'     => bin2hex(random_bytes(32)),
                 ];
@@ -40,13 +40,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo->prepare('UPDATE users SET password = :p WHERE id = :id')
                         ->execute([':p' => password_hash($password, PASSWORD_DEFAULT), ':id' => $user['id']]);
                 }
+                // Update last_login timestamp
+                $pdo->prepare('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = :id')
+                    ->execute([':id' => $user['id']]);
                 log_activity('login', 'User signed in');
                 redirect('index.php');
             }
         } else {
             usleep(300000);
-            log_activity('login_failed', "Failed login attempt for username: $username");
-            $error = 'Wrong username or password.';
+            log_activity('login_failed', "Failed login attempt for email: $email");
+            $error = 'Wrong email or password.';
         }
     }
 }
@@ -73,8 +76,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <form method="POST" action="login.php" class="mt-6 space-y-5">
             <?= csrf_field() ?>
-            <label class="block text-sm font-medium">Username
-                <input type="text" name="username" required autofocus autocomplete="username" maxlength="50" value="<?= e($username) ?>"
+            <label class="block text-sm font-medium">Email
+                <input type="email" name="email" required autofocus autocomplete="email" maxlength="100" value="<?= e($email) ?>"
                        class="mt-1 w-full rounded border border-slate-300 px-3 py-2 font-normal focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-200">
             </label>
             <label class="block text-sm font-medium">Password

@@ -17,10 +17,11 @@ $currentPage = $_GET['page'] ?? 'dashboard';
 if ($currentPage === 'receiving') $currentPage = 'inventory';
 
 // Fetch current user info for sidebar header
-$stmt = $pdo->prepare('SELECT username, role FROM users WHERE id = :id');
+$stmt = $pdo->prepare('SELECT first_name, middle_name, last_name, suffix, role FROM users WHERE id = :id');
 $stmt->execute([':id' => $userId]);
 $currentUser = $stmt->fetch();
-$userName = $currentUser ? e($currentUser['username']) : 'Unknown';
+$fullName = $currentUser ? trim(implode(' ', array_filter([$currentUser['first_name'], $currentUser['middle_name'], $currentUser['last_name'], $currentUser['suffix']]))) : '';
+$name = $fullName ?: 'Unknown';
 $userRoleLabel = $currentUser ? e(ROLE_LABELS[$currentUser['role']] ?? $currentUser['role']) : '';
 
 $groups = [
@@ -142,21 +143,21 @@ $sidebarCollapsed = isset($_SESSION['sidebar_collapsed']) && $_SESSION['sidebar_
             <div class="flex items-center gap-2.5 min-w-0">
                 <!-- User Profile Avatar/Logo -->
                 <div class="w-8 h-8 rounded-full bg-khaki flex items-center justify-center text-slate-900 font-bold text-xs shrink-0 border border-black/10 shadow-sm relative group/avatar">
-                    <?= strtoupper($userName[0] ?? 'U') ?>
+                    <?= strtoupper($name[0] ?? 'U') ?>
 
                     <!-- Identity Tooltip when Collapsed -->
                     <div class="sidebar-hover-label hidden absolute left-full ml-4 px-2 py-1 bg-slate-900 text-white text-xs font-semibold rounded shadow-lg whitespace-nowrap z-50 pointer-events-none">
-                        <p class="font-bold"><?= $userName ?></p>
+                        <p class="font-bold"><?= $name ?></p>
                         <p class="text-[10px] text-slate-300 font-normal"><?= $userRoleLabel ?></p>
                     </div>
                 </div>
                 <div class="min-w-0 sidebar-user-info">
-                    <p class="text-xs font-bold text-slate-900 truncate max-w-[110px]" title="<?= $userName ?>"><?= $userName ?></p>
+                    <p class="text-xs font-bold text-slate-900 truncate max-w-[110px]" title="<?= $name ?>"> <?= $name ?></p>
                     <p class="text-[10px] font-semibold text-slate-600 truncate max-w-[110px]" title="<?= $userRoleLabel ?>"><?= $userRoleLabel ?></p>
                 </div>
             </div>
 
-            <!-- Logout Icon-Only Button placed right after Username/Role -->
+            <!-- Logout Icon-Only Button placed right after Username/Name and Role -->
             <form method="POST" action="logout.php" class="shrink-0 sidebar-logout-btn">
                 <?= csrf_field() ?>
                 <button type="submit"
