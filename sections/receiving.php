@@ -6,13 +6,13 @@
 //   * ingredients.current_stock is always changed by the same amount as the batch change, in the same
 //     transaction, so "On Hand" is correct the moment the page reloads.
 //   * Every change (receive, waste, batch edit, kitchen use, write-off) writes a stock_movements row.
-if (!defined('KAFPD_APP')) { http_response_code(403); exit('Open this page through index.php.'); }
+if (!defined('KAFPD_APP')) { define('ERROR_CODE', 403); require __DIR__ . '/../error.php'; exit; }
 require_perm('receiving');
 
 $ingredientId = filter_var($_GET['ingredient'] ?? null, FILTER_VALIDATE_INT);
 if (!$ingredientId) {
     flash('error', 'Please select an ingredient first.');
-    redirect('index.php?page=inventory');
+    redirect('index?page=inventory');
 }
 
 $stmt = $pdo->prepare('SELECT * FROM ingredients WHERE id = :id');
@@ -20,10 +20,10 @@ $stmt->execute([':id' => $ingredientId]);
 $ingredient = $stmt->fetch();
 if (!$ingredient) {
     flash('error', 'Ingredient not found.');
-    redirect('index.php?page=inventory');
+    redirect('index?page=inventory');
 }
 $unit    = (string) $ingredient['unit'];
-$baseUrl = 'index.php?page=receiving&ingredient=' . $ingredientId;
+$baseUrl = 'index?page=receiving&ingredient=' . $ingredientId;
 
 // =====================================================================================================
 // POST handling: add_batch | log_waste | edit_batch
@@ -273,7 +273,7 @@ $lblCls   = 'block text-xs font-bold uppercase tracking-wider text-slate-500 mb-
 ?>
 
 <div class="mb-6 flex items-center justify-between">
-    <nav class="flex items-center gap-2 text-sm" aria-label="Breadcrumb"><a href="index.php?page=inventory" class="font-semibold text-slate-600 hover:underline">Inventory</a><span class="text-slate-400">&rsaquo;</span><span class="font-semibold text-slate-900"><?= e($ingredient['name']) ?></span></nav>
+    <nav class="flex items-center gap-2 text-sm" aria-label="Breadcrumb"><a href="index?page=inventory" class="font-semibold text-slate-600 hover:underline">Inventory</a><span class="text-slate-400">&rsaquo;</span><span class="font-semibold text-slate-900"><?= e($ingredient['name']) ?></span></nav>
 </div>
 
 <!-- Metric cards -->
@@ -296,7 +296,6 @@ $lblCls   = 'block text-xs font-bold uppercase tracking-wider text-slate-500 mb-
     <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <p class="text-xs font-bold uppercase tracking-wider text-slate-500">Details</p>
         <p class="mt-1 text-sm font-semibold text-slate-800"><?= e($ingredient['storage_location'] ?? 'General Storage') ?></p>
-        <p class="text-xs text-slate-500">Warn before expiry: <?= (int) $ingredient['expiry_alert_days'] ?> days</p>
     </div>
 </div>
 
@@ -582,33 +581,10 @@ function submitDeleteModal() {
     document.body.appendChild(form);
     form.submit();
 }
-
-// Handle Enter key in password field
-document.addEventListener('DOMContentLoaded', function() {
-    const passwordInput = document.getElementById('deleteModalPassword');
-    if (passwordInput) {
-        passwordInput.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                submitDeleteModal();
-            }
-        });
-    }
-
-    // Close modal on backdrop click
-    document.getElementById('deleteModal')?.addEventListener('click', function(e) {
-        if (e.target === this) closeDeleteModal();
-    });
-
-    // Close modal on Escape key
-    document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') closeDeleteModal();
-    });
-});
 </script>
 
 <!-- Password Confirmation Modal -->
-<div id="deleteModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+<div id="deleteModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
     <div class="bg-white rounded-lg shadow-xl max-w-md w-full">
         <div class="px-6 py-4 border-b border-slate-200">
             <h3 class="text-lg font-semibold text-slate-900">Confirm Deletion</h3>

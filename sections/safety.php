@@ -1,5 +1,5 @@
 <?php
-if (!defined('KAFPD_APP')) { http_response_code(403); exit('Open this page through index.php.'); }
+if (!defined('KAFPD_APP')) { define('ERROR_CODE', 403); require __DIR__ . '/../error.php'; exit; }
 require_perm('safety');
 
 function temp_passes(string $subject, float $reading): bool {
@@ -61,76 +61,126 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         default:
             flash('error', 'Unknown action.');
     }
-    redirect('index.php?page=safety');
+    redirect('index?page=safety');
 }
 
-$recent = $pdo->query('SELECT s.logged_at, s.log_type, s.subject, s.reading, s.passed, s.notes, u.first_name, u.middle_name, u.last_name, u.suffix
-                       FROM safety_logs s JOIN users u ON u.id = s.logged_by
-                       ORDER BY s.logged_at DESC, s.id DESC LIMIT 30')->fetchAll();
+// Pagination setup for Recent checks
+$pageNumber = max(1, (int)($_GET['p'] ?? 1));
+$limit      = 25;
+$offset     = ($pageNumber - 1) * $limit;
+
+// Total count for pagination
+$totalFilteredRows = (int) $pdo->query('SELECT COUNT(*) FROM safety_logs')->fetchColumn();
+$totalPages = max(1, ceil($totalFilteredRows / $limit));
+
+$recentStmt = $pdo->prepare('SELECT s.logged_at, s.log_type, s.subject, s.reading, s.passed, s.notes, u.first_name, u.middle_name, u.last_name, u.suffix
+                              FROM safety_logs s JOIN users u ON u.id = s.logged_by
+                              ORDER BY s.logged_at DESC, s.id DESC 
+                              LIMIT :limit OFFSET :offset');
+$recentStmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+$recentStmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+$recentStmt->execute();
+$recent = $recentStmt->fetchAll();
+
 $t = $pdo->query('SELECT COUNT(*) AS total, COALESCE(SUM(passed = 0), 0) AS failed FROM safety_logs WHERE logged_at >= CURDATE()')->fetch();
+
+// Helper builder function for pagination URLs
+function page_url(int $p): string {
+    $params = $_GET;
+    $params['p'] = $p;
+    return 'index?' . http_build_query($params);
+}
 
 $pageTitle = 'Food safety logs';
 ?>
 
-<div class="grid gap-6 lg:grid-cols-2">
-    <section class="rounded-lg border border-slate-200 bg-white p-4">
-        <h2 class="mb-3 font-semibold">Temperature check</h2>
-        <form method="POST" class="space-y-4">
-            <?= csrf_field() ?><input type="hidden" name="action" value="temperature">
-            <label class="block text-sm font-medium">Where did you measure?
-                <select name="subject" required class="mt-1 w-full rounded border border-slate-300 px-3 py-2 font-normal">
-                    <?php foreach (TEMP_RULES as $name => $rule): ?><option value="<?= e($name) ?>"><?= e($name) ?>, <?= e(temp_rule_text($name)) ?></option><?php endforeach; ?>
-                </select>
-            </label>
-            <label class="block text-sm font-medium">Reading (°C)
-                <input type="number" name="reading" step="0.1" min="-60" max="300" required class="mt-1 w-40 rounded border border-slate-300 px-3 py-2 font-normal">
-            </label>
-            <label class="block text-sm font-medium">Corrective action <span class="font-normal text-slate-500">(required if the reading is outside the safe range)</span>
-                <input type="text" name="notes" maxlength="255" class="mt-1 w-full rounded border border-slate-300 px-3 py-2 font-normal">
-            </label>
-            <button class="rounded bg-orange-600 px-4 py-2 font-semibold text-white hover:bg-orange-700">Log temperature</button>
-        </form>
-    </section>
+<div class="w-full grid gap-6 grid-cols-2">
+    <div class="w-full col-span-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+        <section class="h-fit col-span-1 rounded-lg border border-slate-200 bg-white p-4">
+            <h2 class="mb-4 font-semibold">Temperature check</h2>
+            <form method="POST" class="space-y-5">
+                <?= csrf_field() ?><input type="hidden" name="action" value="temperature">
+                <label class="block text-sm font-medium">Where did you measure?
+                    <select name="subject" required class="mt-1 w-full rounded border border-slate-300 px-3 py-2 font-normal">
+                        <?php foreach (TEMP_RULES as $name => $rule): ?><option value="<?= e($name) ?>"><?= e($name) ?>, <?= e(temp_rule_text($name)) ?></option><?php endforeach; ?>
+                    </select>
+                </label>
+                <label class="block text-sm font-medium">Reading (°C)
+                    <input type="number" name="reading" step="0.1" min="-60" max="300" required class="w-full mt-1 w-40 rounded border border-slate-300 px-3 py-2 font-normal">
+                </label>
+                <label class="block text-sm font-medium">Corrective action <span class="font-normal text-slate-500">(required if the reading is outside the safe range)</span>
+                    <input type="text" name="notes" maxlength="255" class="mt-1 w-full rounded border border-slate-300 px-3 py-2 font-normal">
+                </label>
+                <button class="w-full rounded bg-orange-600 px-4 py-2 font-semibold text-white hover:bg-orange-700">Log temperature</button>
+            </form>
+        </section>
 
-    <section class="rounded-lg border border-slate-200 bg-white p-4">
-        <h2 class="mb-3 font-semibold">Sanitation checklist</h2>
-        <form method="POST" class="space-y-3">
-            <?= csrf_field() ?><input type="hidden" name="action" value="sanitation">
-            <?php foreach (SANITATION_CHECKS as $idx => $label): ?>
-                <fieldset class="flex items-center justify-between gap-3 border-b border-slate-100 pb-2 text-sm">
-                    <legend class="sr-only"><?= e($label) ?></legend>
-                    <span><?= e($label) ?></span>
-                    <span class="flex gap-4">
-                        <label class="flex items-center gap-1"><input type="radio" name="check[<?= $idx ?>]" value="pass" required> Pass</label>
-                        <label class="flex items-center gap-1"><input type="radio" name="check[<?= $idx ?>]" value="fail"> Fail</label>
-                    </span>
-                </fieldset>
-            <?php endforeach; ?>
-            <label class="block text-sm font-medium">Corrective action <span class="font-normal text-slate-500">(required if anything failed)</span>
-                <input type="text" name="notes" maxlength="255" class="mt-1 w-full rounded border border-slate-300 px-3 py-2 font-normal">
-            </label>
-            <button class="rounded bg-slate-800 px-4 py-2 font-semibold text-white hover:bg-slate-900">Log checklist</button>
-        </form>
+        <section class="col-span-1 rounded-lg border border-slate-200 bg-white p-4">
+            <h2 class="mb-3 font-semibold">Sanitation checklist</h2>
+            <form method="POST" class="space-y-3">
+                <?= csrf_field() ?><input type="hidden" name="action" value="sanitation">
+                <?php foreach (SANITATION_CHECKS as $idx => $label): ?>
+                    <fieldset class="flex items-center justify-between gap-3 border-b border-slate-100 pb-2 text-sm">
+                        <legend class="sr-only"><?= e($label) ?></legend>
+                        <span><?= e($label) ?></span>
+                        <span class="flex gap-4">
+                            <label class="flex items-center gap-1"><input type="radio" name="check[<?= $idx ?>]" value="pass" required> Pass</label>
+                            <label class="flex items-center gap-1"><input type="radio" name="check[<?= $idx ?>]" value="fail"> Fail</label>
+                        </span>
+                    </fieldset>
+                <?php endforeach; ?>
+                <label class="block text-sm font-medium">Corrective action <span class="font-normal text-slate-500">(required if anything failed)</span>
+                    <input type="text" name="notes" maxlength="255" class="mt-1 w-full rounded border border-slate-300 px-3 py-2 font-normal">
+                </label>
+                <button class="w-full rounded bg-slate-800 px-4 py-2 font-semibold text-white hover:bg-slate-900">Log checklist</button>
+            </form>
+        </section>
+    </div>
+
+    <section class="col-span-2 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+            <h2 class="font-semibold">Recent checks</h2>
+        </div>
+        <table class="w-full text-left text-sm">
+            <thead class="border-b border-slate-200 text-slate-500"><tr><th class="px-4 py-2 font-medium">When</th><th class="font-medium">Type</th><th class="font-medium">Check</th><th class="font-medium">Reading</th><th class="font-medium">Result</th><th class="font-medium">Corrective action</th><th class="font-medium">By</th></tr></thead>
+            <tbody class="divide-y divide-slate-100">
+                <?php foreach ($recent as $r): ?>
+                    <tr>
+                        <td class="px-4 py-2 whitespace-nowrap"><?= e(date('j M, H:i', strtotime($r['logged_at']))) ?></td>
+                        <td><?= $r['log_type'] === 'temperature' ? 'Temperature' : 'Sanitation' ?></td>
+                        <td><?= e($r['subject']) ?></td>
+                        <td class="tabular-nums"><?= $r['reading'] !== null ? e(num($r['reading'], 1)) . ' °C' : '—' ?></td>
+                        <td><?= $r['passed'] ? badge('Pass', 'green') : badge('Fail', 'red') ?></td>
+                        <td class="max-w-xs text-slate-600"><?= e($r['notes'] ?? '—') ?></td>
+                        <td><?php $fn = trim(implode(' ', array_filter([$r['first_name'], $r['middle_name'], $r['last_name'], $r['suffix']]))); echo e($fn ?: '—'); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                <?php if (!$recent): ?><tr><td colspan="7" class="px-4 py-8 text-center text-slate-500">No checks logged yet.</td></tr><?php endif; ?>
+            </tbody>
+        </table>
+
+        <!-- Pagination Bar -->
+        <div class="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-6 py-3">
+            <div class="text-xs text-slate-500">
+                <p class="text-xs text-slate-500">Showing <?= count($recent) ?> of <?= $limit ?> entries (Page <?= $pageNumber ?> of <?= $totalPages ?>)</p>
+            </div>
+            <div class="flex items-center gap-1">
+                <?php if ($pageNumber > 1): ?>
+                    <a href="<?= page_url($pageNumber - 1) ?>" class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 shadow-sm">Previous</a>
+                <?php endif; ?>
+                
+                <?php for ($i = 1; $i <= $totalPages; $i++): ?>
+                    <?php if ($i === 1 || $i === $totalPages || abs($i - $pageNumber) <= 2): ?>
+                        <a href="<?= page_url($i) ?>" class="rounded-md px-3 py-1.5 text-xs font-semibold <?= $i === $pageNumber ? 'bg-slate-900 text-white shadow-sm' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 shadow-sm' ?>"><?= $i ?></a>
+                    <?php elseif ($i === $pageNumber - 3 || $i === $pageNumber + 3): ?>
+                        <span class="px-1 text-slate-400">...</span>
+                    <?php endif; ?>
+                <?php endfor; ?>
+
+                <?php if ($pageNumber < $totalPages): ?>
+                    <a href="<?= page_url($pageNumber + 1) ?>" class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 shadow-sm">Next</a>
+                <?php endif; ?>
+            </div>
+        </div>
     </section>
 </div>
-
-<section class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-    <h2 class="border-b border-slate-200 px-4 py-3 font-semibold">Recent checks</h2>
-    <table class="w-full text-left text-sm">
-        <thead class="border-b border-slate-200 text-slate-500"><tr><th class="px-4 py-2 font-medium">When</th><th class="font-medium">Type</th><th class="font-medium">Check</th><th class="font-medium">Reading</th><th class="font-medium">Result</th><th class="font-medium">Corrective action</th><th class="font-medium">By</th></tr></thead>
-        <tbody class="divide-y divide-slate-100">
-            <?php foreach ($recent as $r): ?>
-                <tr>
-                    <td class="px-4 py-2 whitespace-nowrap"><?= e(date('j M, H:i', strtotime($r['logged_at']))) ?></td>
-                    <td><?= $r['log_type'] === 'temperature' ? 'Temperature' : 'Sanitation' ?></td>
-                    <td><?= e($r['subject']) ?></td>
-                    <td class="tabular-nums"><?= $r['reading'] !== null ? e(num($r['reading'], 1)) . ' °C' : '' ?></td>
-                    <td><?= $r['passed'] ? badge('Pass', 'green') : badge('Fail', 'red') ?></td>
-                    <td class="max-w-xs text-slate-600"><?= e($r['notes'] ?? '') ?></td>
-                    <td><?php $fn = trim(implode(' ', array_filter([$r['first_name'], $r['middle_name'], $r['last_name'], $r['suffix']]))); echo e($fn ?: '—'); ?></td>
-                </tr>
-            <?php endforeach; ?>
-            <?php if (!$recent): ?><tr><td colspan="7" class="px-4 py-8 text-center text-slate-500">No checks logged yet.</td></tr><?php endif; ?>
-        </tbody>
-    </table>
-</section>

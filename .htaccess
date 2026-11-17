@@ -3,15 +3,28 @@ DirectoryIndex index.php
 
 RewriteEngine On
 
-# Code and data folders are never served directly (config/db.php, database/*.sql, includes/*.php, sections/*.php).
-RewriteRule ^(config|includes|sections|database)(/|$) - [F,L]
+# ---- 403: code and data folders, hidden files and dumps are never served (shows error.php) ----
+RewriteRule ^(config|includes|sections|database)(/|$) error.php?code=403 [L]
+RewriteRule (^|/)\.(?!well-known) error.php?code=403 [L]
+RewriteRule \.(sql|log|md|env|ini|bak|rar|zip)$ error.php?code=403 [NC,L]
 
-# Pretty URLs: /inventory -> index.php?page=inventory (index.php only loads pages from its own allowlist).
+# ---- Pretty URLs: /inventory -> index.php?page=inventory (unknown names show the 404 page inside the app) ----
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^([a-zA-Z0-9_-]+)$ index.php?page=$1 [QSA,L]
 
-# Never serve database dumps, logs, notes or environment files.
+# ---- 403: a folder with no index page (e.g. /assets/) is not browsable ----
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteCond %{REQUEST_FILENAME}/index.php !-f
+RewriteRule ^.+ error.php?code=403 [L]
+
+# ---- 404: any other address that does not exist (a missing image/css/js file gets the plain server 404) ----
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_URI} !\.(css|js|map|png|jpe?g|gif|svg|ico|webp|woff2?|ttf)$ [NC]
+RewriteRule ^ error.php?code=404 [L]
+
+# Safety net if mod_rewrite is off: still block dumps and notes.
 <FilesMatch "\.(sql|log|md|env|ini|bak|rar|zip)$">
     Require all denied
 </FilesMatch>

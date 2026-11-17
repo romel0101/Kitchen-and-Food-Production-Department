@@ -1,5 +1,5 @@
 <?php
-// index.php - front controller. Every page is opened as index.php?page=NAME.
+// index - front controller. Every page is opened as index?page=NAME.
 require __DIR__ . '/includes/auth.php';          // session, login check, helpers
 
 // Sections refuse to run unless they are loaded through this file.
@@ -22,19 +22,32 @@ if (($_GET['page'] ?? '') === 'ajax_sidebar_toggle') {
 $allowed_pages = [
     'dashboard', 'orders', 'inventory', 'recipes',
     'receiving', 'expiry', 'waste', 'reports', 'safety', 'users', 'user_activity',
-    'dashboard_ajax'
+    'dashboard_ajax', '403', '404'
 ];
 
-// 2. Which page? Default to the dashboard.
+// 2. Which page? No page given = the dashboard. A name that is not allowed = the 404 page.
 $page = $_GET['page'] ?? 'dashboard';
+if ($page === '') $page = 'dashboard';
 if (!is_string($page) || !in_array($page, $allowed_pages, true)) {
-    $page = 'dashboard';
+    $page = '404';
 }
 
 // 3. Run the section and capture its HTML. A section may redirect (after a form post) before any output.
 ob_start();
 try {
     require __DIR__ . '/sections/' . $page . '.php';
+    $page_content = ob_get_clean();
+} catch (AccessDenied $ex) {
+    // The role is not allowed to use this page (require_perm / deny): show the 403 page.
+    ob_end_clean();
+    if ($page === 'dashboard_ajax') {                      // a data request wants a status code, not a page
+        http_response_code(403);
+        header('Content-Type: application/json');
+        exit('{"error":"forbidden"}');
+    }
+    $page = '403';
+    ob_start();
+    require __DIR__ . '/sections/403.php';
     $page_content = ob_get_clean();
 } catch (Throwable $ex) {
     ob_end_clean();
@@ -60,10 +73,12 @@ $pageTitle = $pageTitle ?? ucfirst($page);
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= e($pageTitle) ?> - KAFPD</title>
 
+    <link rel="icon" type="image/png" href="assets/img/favicon.png">
     <link rel="stylesheet" href="assets/css/style.css">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="assets/css/tailwind.css">
+
+    <script src="assets/js/chart.js"></script>
+    <script src="assets/js/live-filter.js"></script>
 </head>
 <body class="bg-gray-100 flex h-screen overflow-hidden text-slate-800">
 
@@ -74,7 +89,9 @@ $pageTitle = $pageTitle ?? ucfirst($page);
     <div class="flex-1 flex flex-col overflow-y-auto">
 
         <!-- Top Navbar -->
-        <?php include __DIR__ . '/includes/navbar.php'; ?>
+        <div class="h-16">
+            <?php include __DIR__ . '/includes/navbar.php'; ?>
+        </div>
 
         <!-- Dynamic Page Content -->
         <main class="p-8">

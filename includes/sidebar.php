@@ -25,16 +25,16 @@ $name = $fullName ?: 'Unknown';
 $userRoleLabel = $currentUser ? e(ROLE_LABELS[$currentUser['role']] ?? $currentUser['role']) : '';
 
 $groups = [
-    ''               => [[null, 'dashboard', 'index.php', 'Dashboard', null]],
-    'Kitchen'        => [['orders', 'orders', 'index.php?page=orders', 'Order queue', 'orders'],
-                         ['recipes', 'recipes', 'index.php?page=recipes', 'Recipes', null]],
-    'Stock'          => [['inventory', 'inventory', 'index.php?page=inventory', 'Inventory', 'low'],
-                         ['expiry', 'expiry', 'index.php?page=expiry', 'Expiry tracking', 'expiring']],
-    'Records'        => [['waste', 'waste', 'index.php?page=waste', 'Food waste', null],
-                         ['safety', 'safety', 'index.php?page=safety', 'Food safety logs', null],
-                         ['reports', 'reports', 'index.php?page=reports', 'Production reports', null]],
-    'Administration' => [['users', 'users', 'index.php?page=users', 'Users', null],
-                         ['users', 'user_activity', 'index.php?page=user_activity', 'User Activity', null]],
+    ''               => [[null, 'dashboard', 'index?page=dashboard', 'Dashboard', null]],
+    'Kitchen'        => [['orders', 'orders', 'index?page=orders', 'Order queue', 'orders'],
+                         ['recipes', 'recipes', 'index?page=recipes', 'Recipes', null]],
+    'Stock'          => [['inventory', 'inventory', 'index?page=inventory', 'Inventory', 'low'],
+                         ['expiry', 'expiry', 'index?page=expiry', 'Expiry tracking', 'expiring']],
+    'Records'        => [['waste', 'waste', 'index?page=waste', 'Food waste', null],
+                         ['safety', 'safety', 'index?page=safety', 'Food safety logs', null],
+                         ['reports', 'reports', 'index?page=reports', 'Production reports', null]],
+    'Administration' => [['users', 'users', 'index?page=users', 'Users', null],
+                         ['users', 'user_activity', 'index?page=user_activity', 'User Activity', null]],
 ];
 $countTone = ['orders' => 'bg-blue-500', 'low' => 'bg-red-500', 'expiring' => 'bg-amber-500'];
 
@@ -152,7 +152,7 @@ $sidebarCollapsed = isset($_SESSION['sidebar_collapsed']) && $_SESSION['sidebar_
                     </div>
                 </div>
                 <div class="min-w-0 sidebar-user-info">
-                    <p class="text-xs font-bold text-slate-900 truncate max-w-[110px]" title="<?= $name ?>"> <?= $name ?></p>
+                    <p class="text-xs font-bold text-slate-900" title="<?= $name ?>"> <?= $name ?></p>
                     <p class="text-[10px] font-semibold text-slate-600 truncate max-w-[110px]" title="<?= $userRoleLabel ?>"><?= $userRoleLabel ?></p>
                 </div>
             </div>
@@ -221,7 +221,7 @@ function toggleDesktopSidebar() {
     formData.append('csrf', '<?= e($_SESSION['csrf'] ?? '') ?>');
     formData.append('collapsed', isCollapsed ? '0' : '1');
 
-    fetch('index.php?page=ajax_sidebar_toggle', {
+    fetch('index?page=ajax_sidebar_toggle', {
         method: 'POST',
         body: formData
     }).catch(() => {});

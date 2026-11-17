@@ -10,6 +10,30 @@
     background-color: #B59F6C;
 }
 
+input:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+    border-color: #B59F6C;
+}
+
+textarea:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+    border-color: #B59F6C;
+}
+
+select:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+    border-color: #B59F6C;
+}
+
+option:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+    border-color: #B59F6C;
+}
+
 /* Custom scrollbar for user profile box in header */
 .custom-scrollbar::-webkit-scrollbar {
     height: 4px;
@@ -318,4 +342,54 @@
     .gap-6 {
         gap: 1rem !important;
     }
+}
+
+/* Ensure that the loading overlay is always on top of other elements */
+#L4 circle {
+  fill: #f54a00;
+}
+
+#L9 rect {
+  fill: #f54a00;
+}
+
+#L5 circle {
+  fill: #f54a00;
+}
+
+#L6 rect[fill="#fff"] {
+  fill: #f54a00;
+}
+#L6 rect[fill="none"] {
+  stroke: #f54a00;
+}
+
+#L3 circle[fill="#fff"] {
+  fill: #f54a00;
+}
+#L3 circle[fill="none"] {
+  stroke: #f54a00;
+}
+#L3 circle[stroke="#e74c3c"] {
+  stroke: #f54a00;
+}
+
+#L2 circle,
+#L2 line {
+  stroke: #f54a00;
+}
+
+#L7 path {
+  fill: #f54a00;
+}
+
+#L1 circle {
+  stroke: #f54a00;
+}
+#L1 g rect {
+  fill: #f54a00;
+}
+
+#Layer_1 rect {
+  fill: #f54a00;
 }

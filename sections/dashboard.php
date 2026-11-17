@@ -1,13 +1,17 @@
 <?php
-if (!defined('KAFPD_APP')) { http_response_code(403); exit('Open this page through index.php.'); }
+if (!defined('KAFPD_APP')) { define('ERROR_CODE', 403); require __DIR__ . '/../error.php'; exit; }
 $pageTitle = 'Dashboard';
 $stats     = [];
 $attention = [];
 
 if (can('inventory')) {
-    $low = $pdo->query('SELECT name, current_stock, unit, reorder_level FROM ingredients WHERE current_stock <= reorder_level ORDER BY name')->fetchAll();
+    $nostock = $pdo->query('SELECT name, current_stock, unit, reorder_level FROM ingredients WHERE current_stock = 0 ORDER BY name')->fetchAll();
+    foreach ($nostock as $i) {
+        $attention[] = ['red', sprintf('%s is out of stock.', $i['name']), 'index?page=inventory&stock_status=Out'];
+    }
+    $low = $pdo->query('SELECT name, current_stock, unit, reorder_level FROM ingredients WHERE current_stock > 0 AND current_stock <= reorder_level ORDER BY name')->fetchAll();
     foreach ($low as $i) {
-        $attention[] = ['red', sprintf('%s is low: %s %s left, reorder level is %s.', $i['name'], num($i['current_stock']), $i['unit'], num($i['reorder_level'])), 'index.php?page=inventory&stock_status=Low'];
+        $attention[] = ['red', sprintf('%s is low: %s %s left, reorder level is %s.', $i['name'], num($i['current_stock']), $i['unit'], num($i['reorder_level'])), 'index?page=inventory&stock_status=Low'];
     }
     $exp = $pdo->query('SELECT i.name, i.unit, r.quantity_remaining, DATEDIFF(r.expiry_date, CURDATE()) AS days_left
                         FROM stock_receipts r JOIN ingredients i ON i.id = r.ingredient_id
@@ -17,7 +21,7 @@ if (can('inventory')) {
     foreach ($exp as $b) {
         $d = (int) $b['days_left'];
         $when = $d < 0 ? 'expired ' . abs($d) . ' day' . (abs($d) === 1 ? '' : 's') . ' ago' : ($d === 0 ? 'expires today' : "expires in $d day" . ($d === 1 ? '' : 's'));
-        $attention[] = [$d <= 0 ? 'red' : 'amber', sprintf('%s %s %s %s.', num($b['quantity_remaining']), $b['unit'], $b['name'], $when), 'index.php?page=expiry'];
+        $attention[] = [$d <= 0 ? 'red' : 'amber', sprintf('%s %s %s %s.', num($b['quantity_remaining']), $b['unit'], $b['name'], $when), 'index?page=expiry'];
     }
     array_push($stats, ['Low-stock items', count($low)], ['Batches near expiry', count($exp)]);
 }
@@ -30,14 +34,176 @@ if (can('safety')) {
     $s = $pdo->query('SELECT COUNT(*) AS total, COALESCE(SUM(passed = 0), 0) AS failed FROM safety_logs WHERE logged_at >= CURDATE()')->fetch();
     $stats[] = ['Safety checks today', (int) $s['total']];
     if ((int) $s['failed'] > 0) {
-        $attention[] = ['red', (int) $s['failed'] . ' food safety check' . ((int) $s['failed'] === 1 ? '' : 's') . ' failed today. Confirm the corrective action was done.', 'index.php?page=safety'];
+        $attention[] = ['red', (int) $s['failed'] . ' food safety check' . ((int) $s['failed'] === 1 ? '' : 's') . ' failed today. Confirm the corrective action was done.', 'index?page=safety'];
     } elseif ((int) $s['total'] === 0) {
-        $attention[] = ['amber', 'No food safety checks have been logged today.', 'index.php?page=safety'];
+        $attention[] = ['amber', 'No food safety checks have been logged today.', 'index?page=safety'];
     }
 }
+
+// Menu availability: what the kitchen can make with the stock on hand. Shown to every role that may open Recipes
+// (the chef gets this as the main part of the dashboard; the numbers come from the same function the Recipes page uses).
+$menu = null;
+$lowPortions = 5;                                      // "running low" = this many portions or fewer
+if (can('recipes')) {
+    /** The ingredient that runs out first (the one that limits how many portions can be made). */
+    function dash_limiter(array $ings): ?string {
+        $best = null; $name = null;
+        foreach ($ings as $l) {
+            if (!$l['unit_ok']) return $l['name'];
+            $per = to_base_milli($l['per_portion'], $l['recipe_unit']);
+            if ($per <= 0) continue;
+            $n = intdiv(max(0, to_base_milli($l['in_stock'], $l['unit'])), $per);
+            if ($best === null || $n < $best) { $best = $n; $name = $l['name']; }
+        }
+        return $name;
+    }
+    $menu = ['available' => 0, 'out' => 0, 'norecipe' => 0, 'out_list' => [], 'low_list' => []];
+    foreach ($pdo->query('SELECT id, name FROM menu_items ORDER BY name')->fetchAll() as $dish) {
+        $rep = get_menu_availability($pdo, (int) $dish['id']);
+        if (!$rep['has_recipe']) { $menu['norecipe']++; continue; }
+        if (!$rep['available']) {
+            $menu['out']++;
+            $menu['out_list'][] = ['id' => (int) $dish['id'], 'name' => $dish['name'],
+                                   'short' => array_values(array_map(fn($l) => $l['name'], array_filter($rep['ingredients'], fn($l) => $l['is_short'])))];
+        } else {
+            $menu['available']++;
+            if ($rep['max_portions'] !== null && $rep['max_portions'] <= $lowPortions) {
+                $menu['low_list'][] = ['id' => (int) $dish['id'], 'name' => $dish['name'], 'portions' => (int) $rep['max_portions'], 'limiter' => dash_limiter($rep['ingredients'])];
+            }
+        }
+    }
+    usort($menu['low_list'], fn($a, $b) => $a['portions'] <=> $b['portions']);
+}
+
+// Kitchen view (chef; also shown to the administrator): queue numbers, and which ingredients are holding dishes back.
+$queue = null;
+$hold  = [];
+if ($menu !== null) {
+    $menu['total'] = $menu['available'] + $menu['out'] + $menu['norecipe'];
+    foreach ($menu['out_list'] as $d) foreach ($d['short'] as $n) $hold[$n]['out'] = ($hold[$n]['out'] ?? 0) + 1;
+    foreach ($menu['low_list'] as $d) if ($d['limiter']) $hold[$d['limiter']]['low'] = ($hold[$d['limiter']]['low'] ?? 0) + 1;
+    uasort($hold, fn($a, $b) => [($b['out'] ?? 0), ($b['low'] ?? 0)] <=> [($a['out'] ?? 0), ($a['low'] ?? 0)]);
+
+    if (can('orders')) {
+        $lateSec = (WAIT_LIMIT_MIN['preparing'] ?? 15) * 60;
+        $tickets = $pdo->query('SELECT o.id, o.order_number, o.order_type, o.table_number, o.customer_name,
+                                       TIMESTAMPDIFF(SECOND, o.created_at, NOW()) AS wait_sec
+                                FROM orders o WHERE o.ready_at IS NULL ORDER BY o.created_at ASC, o.id ASC')->fetchAll();
+        $itemsBy = [];
+        if ($tickets) {
+            $ids = array_map(fn($t) => (int) $t['id'], $tickets);
+            $st  = $pdo->prepare('SELECT order_id, item_name, current_stock AS qty FROM order_items WHERE order_id IN (' . implode(',', array_fill(0, count($ids), '?')) . ') ORDER BY id');
+            $st->execute($ids);
+            foreach ($st->fetchAll() as $r) $itemsBy[(int) $r['order_id']][] = $r;
+        }
+        $queue = [
+            'open'   => count($tickets),
+            'dishes' => array_sum(array_map(fn($l) => array_sum(array_map(fn($i) => (int) $i['qty'], $l)), $itemsBy)),
+            'oldest' => $tickets ? (int) $tickets[0]['wait_sec'] : 0,
+            'late'   => count(array_filter($tickets, fn($t) => (int) $t['wait_sec'] >= $lateSec)),
+            'ready'  => (int) $pdo->query('SELECT COUNT(*) FROM orders WHERE ready_at >= CURDATE()')->fetchColumn(),
+            'list'   => array_slice($tickets, 0, 6),
+            'items'  => $itemsBy,
+            'lateSec'=> $lateSec,
+        ];
+    }
+}
+$chefOnly = $menu !== null && !can('inventory');
+
+/** "7 min", "1 h 05 min" */
+function dash_wait(int $sec): string {
+    $m = intdiv(max(0, $sec), 60);
+    return $m < 60 ? $m . ' min' : intdiv($m, 60) . ' h ' . str_pad((string) ($m % 60), 2, '0', STR_PAD_LEFT) . ' min';
+}
+$hour     = (int) date('G');
+$greeting = $hour < 12 ? 'Good morning' : ($hour < 18 ? 'Good afternoon' : 'Good evening');
+
+// The "Critical Attention" panel is built from inventory and safety data; a role with neither (the chef) has nothing to show there.
+$showAttention = $attention || can('inventory') || can('safety');
+
+// Fetch current user info for sidebar header
+$stmt = $pdo->prepare('SELECT first_name FROM users WHERE id = :id');
+$stmt->execute([':id' => $userId]);
+$currentUser = $stmt->fetch();
+$name = $currentUser ? $currentUser['first_name'] : 'Error';
 ?>
 
 <div class="grid gap-6">
+    <?php if ($menu !== null): ?>
+    <div id="chefLive" class="grid gap-6">
+
+        <!-- Welcome banner -->
+        <div class="flex flex-col items-start justify-between gap-4 rounded-2xl bg-gradient-to-r from-slate-900 to-slate-800 text-slate-900 shadow-md sm:flex-row sm:items-center sm:p-8">
+            <div>
+                <h1 class="text-2xl font-black tracking-tight sm:text-3xl"><?= e($greeting) ?>, Chef!</h1>
+                <p class="mt-2 flex items-center gap-1.5 text-xs text-slate-400">
+                    Welcome to the kitchen dashboard.
+                </p>
+            </div>
+            <div class="flex shrink-0 flex-wrap items-center gap-3">
+                <?php if (can('orders')): ?><a href="index?page=orders" class="rounded-lg bg-orange-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-orange-700">Open Order Queue</a><?php endif; ?>
+            </div>
+        </div>
+
+
+        <?php if ($chefOnly): ?>
+        <?php if ($queue): ?>
+        <!-- Queue -->
+        <section>
+            <h2 class="mb-3 text-lg font-bold text-slate-900">Order Queue</h2>
+            <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <dt class="text-xs font-bold uppercase tracking-wider text-slate-400">Open tickets</dt>
+                    <dd class="mt-2 text-3xl font-extrabold tabular-nums text-slate-900"><?= (int) $queue['open'] ?></dd>
+                    <p class="mt-1 text-xs text-slate-500"><?= (int) $queue['dishes'] ?> dish<?= $queue['dishes'] === 1 ? '' : 'es' ?> to prepare</p>
+                </div>
+                <div class="rounded-xl border p-5 shadow-sm <?= $queue['late'] ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-white' ?>">
+                    <dt class="text-xs font-bold uppercase tracking-wider <?= $queue['late'] ? 'text-red-600' : 'text-slate-400' ?>">Running late</dt>
+                    <dd class="mt-2 text-3xl font-extrabold tabular-nums <?= $queue['late'] ? 'text-red-700' : 'text-slate-900' ?>"><?= (int) $queue['late'] ?></dd>
+                    <p class="mt-1 text-xs <?= $queue['late'] ? 'text-red-600' : 'text-slate-500' ?>">over <?= (int) (WAIT_LIMIT_MIN['preparing'] ?? 15) ?> min waiting</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <dt class="text-xs font-bold uppercase tracking-wider text-slate-400">Longest wait</dt>
+                    <dd class="mt-2 text-3xl font-extrabold tabular-nums text-slate-900"><?= $queue['open'] ? e(dash_wait($queue['oldest'])) : '&mdash;' ?></dd>
+                    <p class="mt-1 text-xs text-slate-500">oldest open ticket</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <dt class="text-xs font-bold uppercase tracking-wider text-slate-400">Ready today</dt>
+                    <dd class="mt-2 text-3xl font-extrabold tabular-nums text-green-700"><?= (int) $queue['ready'] ?></dd>
+                    <p class="mt-1 text-xs text-slate-500">tickets marked ready</p>
+                </div>
+            </div>
+
+            <?php if ($queue['list']): ?>
+            <div class="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div class="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-6 py-3">
+                    <h3 class="text-sm font-bold text-slate-900">Next up</h3>
+                    <a href="index?page=orders" class="text-xs font-semibold text-orange-700 hover:underline">View all<?= $queue['open'] > count($queue['list']) ? ' ' . (int) $queue['open'] : '' ?> &rsaquo;</a>
+                </div>
+                <ul class="divide-y divide-slate-100">
+                    <?php foreach ($queue['list'] as $t):
+                        $late = (int) $t['wait_sec'] >= $queue['lateSec'];
+                        $its  = $queue['items'][(int) $t['id']] ?? []; ?>
+                        <li class="flex items-start gap-4 px-6 py-3.5 text-sm">
+                            <span class="mt-1.5 h-2 w-2 shrink-0 rounded-full <?= $late ? 'bg-red-500' : 'bg-amber-400' ?>"></span>
+                            <div class="min-w-0 flex-1">
+                                <p class="font-semibold text-slate-900"><?= e($t['customer_name']) ?>
+                                    <span class="ml-1 text-xs font-medium text-slate-400"><?= e($t['order_type']) ?><?= $t['table_number'] !== null && $t['table_number'] !== '' ? ' &middot; Table ' . e($t['table_number']) : '' ?></span></p>
+                                <p class="truncate text-xs text-slate-500"><?= $its ? e(implode(', ', array_map(fn($i) => (int) $i['qty'] . ' × ' . $i['item_name'], $its))) : 'No items' ?></p>
+                            </div>
+                            <span class="shrink-0 rounded-full px-2.5 py-1 text-xs font-bold tabular-nums <?= $late ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-700' ?>"><?= e(dash_wait((int) $t['wait_sec'])) ?></span>
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+            </div>
+            <?php endif; ?>
+        </section>
+        <?php endif; ?>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
+
+    <?php if ($stats): ?>
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <?php foreach ($stats as [$label, $value]): ?>
             <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition-shadow">
@@ -46,7 +212,9 @@ if (can('safety')) {
             </div>
         <?php endforeach; ?>
     </div>
+    <?php endif; ?>
 
+    <?php if (can('inventory')): ?>
     <div class="grid gap-6 lg:grid-cols-3">
         <!-- Restock Line Chart -->
         <section class="lg:col-span-2 space-y-6">
@@ -91,7 +259,9 @@ if (can('safety')) {
             </div>
         </section>
     </div>
+    <?php endif; ?>
 
+    <?php if ($showAttention): ?>
     <section class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <h2 class="border-b border-slate-100 bg-slate-50 px-6 py-4 font-bold text-slate-900">Critical Attention Needed</h2>
         <?php if (!$attention): ?>
@@ -110,33 +280,44 @@ if (can('safety')) {
             </ul>
         <?php endif; ?>
     </section>
+    <?php endif; ?>
 </div>
 
-    <section class="rounded-lg border border-slate-200 bg-white shadow-sm">
-        <h2 class="border-b border-slate-200 px-4 py-3 font-semibold">Needs attention</h2>
-        <?php if (!$attention): ?>
-            <p class="px-4 py-6 text-sm text-slate-500">Nothing needs attention right now.</p>
-        <?php else: ?>
-            <ul class="divide-y divide-slate-100">
-                <?php foreach ($attention as [$tone, $text, $link]): ?>
-                    <li>
-                        <a href="<?= e($link) ?>" class="flex items-start gap-3 px-4 py-3 text-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-orange-500">
-                            <span class="mt-1.5 h-2 w-2 shrink-0 rounded-full <?= $tone === 'red' ? 'bg-red-600' : 'bg-amber-500' ?>"></span>
-                            <span><?= e($text) ?></span>
-                        </a>
-                    </li>
-                <?php endforeach; ?>
-            </ul>
-        <?php endif; ?>
-    </section>
-</div>
+<?php if ($menu !== null && $chefOnly): ?>
+<script>
+// Keeps the kitchen view current without a reload: every 15 s the page is fetched again and the live area swapped in.
+(function () {
+    var box = document.getElementById('chefLive');
+    if (!box) return;
+    var busy = false;
+    function refresh() {
+        if (busy || document.hidden) return;
+        busy = true;
+        fetch('index.php?page=dashboard', {credentials: 'same-origin'})
+            .then(function (r) { return r.text(); })
+            .then(function (html) {
+                var next = new DOMParser().parseFromString(html, 'text/html').getElementById('chefLive');
+                if (!next) { location.reload(); return; }
+                if (box.innerHTML !== next.innerHTML) box.innerHTML = next.innerHTML;
+            })
+            .catch(function () {
+                var d = document.getElementById('chefDot'), t = document.getElementById('chefStamp');
+                if (d) d.className = 'h-2 w-2 rounded-full bg-red-400';
+                if (t) t.textContent = 'Offline \u00b7 retrying';
+            })
+            .finally(function () { busy = false; });
+    }
+    setInterval(refresh, 15000);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh(); });
+})();
+</script>
+<?php endif; ?>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<?php if (can('inventory')): ?>
 <script>
 let restockChart;
 
 async function fetchDashboardData(params, btnElement) {
-    // params can be { days: number } or { from: string, to: string }
     if (btnElement) {
         document.querySelectorAll('.range-btn').forEach(b => {
             b.classList.remove('bg-white', 'text-slate-900', 'shadow-sm');
@@ -145,14 +326,13 @@ async function fetchDashboardData(params, btnElement) {
         btnElement.classList.add('bg-white', 'text-slate-900', 'shadow-sm');
         btnElement.classList.remove('text-slate-700');
     } else {
-        // Custom date range - clear active button state
         document.querySelectorAll('.range-btn').forEach(b => {
             b.classList.remove('bg-white', 'text-slate-900', 'shadow-sm');
             b.classList.add('text-slate-700');
         });
     }
 
-    let url = 'index.php?page=dashboard_ajax';
+    let url = 'index?page=dashboard_ajax';
     if (params.days) {
         url += `&days=${params.days}`;
     } else if (params.from && params.to) {
@@ -163,18 +343,15 @@ async function fetchDashboardData(params, btnElement) {
         const response = await fetch(url);
         const data = await response.json();
 
-        // Update Chart
         restockChart.data.labels = data.chartDates;
         restockChart.data.datasets[0].data = data.chartCounts;
         restockChart.update();
 
-        // Reflect date range into From/To date inputs if returned
         if (data.from && data.to) {
             document.getElementById('dateFrom').value = data.from;
             document.getElementById('dateTo').value = data.to;
         }
 
-        // Update Most Used Ingredients
         const ingContainer = document.getElementById('topIngredientsContainer');
         if (!data.ingredients || data.ingredients.length === 0) {
             ingContainer.innerHTML = '<p class="text-sm text-slate-500 py-6 text-center">No ingredient usage recorded in this period.</p>';
@@ -284,8 +461,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Default 7 days click active on 7D button
     const defaultBtn = document.querySelector('button[onclick*="setDashboardRange(7"]');
-    fetchDashboardData({ days: 7 }, defaultBtn);
+    if (defaultBtn) {
+        fetchDashboardData({ days: 7 }, defaultBtn);
+    }
 });
 </script>
+<?php endif; ?>

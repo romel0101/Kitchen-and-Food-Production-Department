@@ -1,4 +1,4 @@
-<header class="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur sm:px-6">
+<header class="sticky top-0 z-20 flex h-16 w-full items-center gap-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur sm:px-6" style="scrollbar-gutter: stable;">
     <div class="flex items-center md:hidden">
         <button type="button" id="menuBtn" aria-label="Open menu" class="inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:bg-gray-100 focus:text-gray-500 transition duration-150 ease-in-out">
             <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">

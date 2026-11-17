@@ -1,28 +1,37 @@
 <?php
-if (!defined('KAFPD_APP')) { http_response_code(403); exit('Access denied.'); }
+if (!defined('KAFPD_APP')) { define('ERROR_CODE', 403); require __DIR__ . '/../error.php'; exit; }
+require_perm('inventory');                      // restock and usage figures are inventory data: chefs get a 403, not an empty chart
 header('Content-Type: application/json');
 
-// Handle both 'days' parameter (1, 7, 30) and custom 'from'/'to' dates
 $isHourly = false;
+$now = date('Y-m-d H:i:s', strtotime('+1 hour'));
+$today = date('Y-m-d', strtotime('+1 hour'));
+
 if (isset($_GET['days'])) {
     $days = (int) $_GET['days'];
     if ($days === 1) {
         $isHourly = true;
-        $from = date('Y-m-d 00:00:00');
-        $to = date('Y-m-d 23:59:59');
+        $from = date('Y-m-d H:i:s', strtotime('-24 hours', strtotime($now)));
+        $to = $now;
     } else {
-        $to = date('Y-m-d');
-        $from = date('Y-m-d', strtotime("-" . ($days - 1) . " days"));
+        $from = date('Y-m-d 00:00:00', strtotime("-" . ($days - 1) . " days", strtotime($now)));
+        $to = $now;
     }
 } else {
-    $from = valid_date($_GET['from'] ?? '') ?? date('Y-m-d', strtotime('-6 days'));
-    $to   = valid_date($_GET['to'] ?? '')   ?? date('Y-m-d');
-    if ($from > $to) [$from, $to] = [$to, $from];
-    // If custom range spans a single day, show hourly
+    $from = valid_date($_GET['from'] ?? '') ?? date('Y-m-d', strtotime('-6 days', strtotime($now)));
+    $to   = valid_date($_GET['to'] ?? '')   ?? $today;
+    
+    if ($from > $to) {
+        [$from, $to] = [$to, $from];
+    }
+    
+    // If From and To are the exact same date (e.g., 2026-11-12 to 2026-11-12), switch to hourly time mode!
     if ($from === $to) {
         $isHourly = true;
         $from .= ' 00:00:00';
-        $to   .= ' 23:59:59';
+        $to = ($to === substr($now, 0, 10)) ? $now : $to . ' 23:59:59';
+    } else {
+        $to = ($to === substr($now, 0, 10)) ? $now : $to . ' 23:59:59';
     }
 }
 
@@ -32,18 +41,31 @@ $topIngredients = [];
 
 if (can('inventory')) {
     if ($isHourly) {
-        // Group by hour for 1D view
-        $stmt = $pdo->prepare("SELECT HOUR(received_at) as restock_hour, COUNT(*) as count
+        // Group by exact Y-m-d H hour block
+        $stmt = $pdo->prepare("SELECT DATE_FORMAT(received_at, '%Y-%m-%d %H') as restock_hour, COUNT(*) as count
                                FROM stock_receipts
                                WHERE received_at >= :from AND received_at <= :to
-                               GROUP BY HOUR(received_at)
+                               GROUP BY restock_hour
                                ORDER BY restock_hour ASC");
         $stmt->execute([':from' => $from, ':to' => $to]);
         $restocks = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
 
-        for ($h = 0; $h < 24; $h++) {
-            $chartDates[] = date('g A', strtotime("$h:00"));
-            $chartCounts[] = (int) ($restocks[$h] ?? 0);
+        // If it's a custom single-day filter, generate hours from 00:00 to 23:00 for that day
+        if (isset($_GET['from']) && $_GET['from'] === $_GET['to']) {
+            $startHourTs = strtotime($_GET['from'] . ' 00:00:00');
+            $endHourTs   = strtotime($_GET['from'] . ' 23:00:00');
+        } else {
+            // Otherwise use rolling 24-hour window
+            $endHourTs   = strtotime(date('Y-m-d H:00:00', strtotime($now)));
+            $startHourTs = strtotime('-23 hours', $endHourTs);
+        }
+        
+        $curr = $startHourTs;
+        while ($curr <= $endHourTs) {
+            $key = date('Y-m-d H', $curr);           
+            $chartDates[] = date('g:i A', $curr);    // Displays minute-precise labels (e.g., "6:30 PM", "6:00 PM")
+            $chartCounts[] = (int) ($restocks[$key] ?? 0);
+            $curr = strtotime('+1 hour', $curr);
         }
     } else {
         // Group by day for multi-day view

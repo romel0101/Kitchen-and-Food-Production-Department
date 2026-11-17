@@ -1,5 +1,5 @@
 <?php
-if (!defined('KAFPD_APP')) { http_response_code(403); exit('Open this page through index.php.'); }
+if (!defined('KAFPD_APP')) { define('ERROR_CODE', 403); require __DIR__ . '/../error.php'; exit; }
 require_perm('users');
 
 // Filtering
@@ -48,7 +48,6 @@ $types = $pdo->query('SELECT DISTINCT activity_type FROM user_activity_log ORDER
 $pageTitle = 'User Activity';
 ?>
 <div class="rounded-lg border border-slate-200 bg-white p-4 mb-6">
-    <h2 class="mb-3 font-semibold">Filters</h2>
     <form id="filterForm" class="flex flex-wrap items-end gap-4">
         <input type="hidden" name="page" value="user_activity">
 
@@ -78,7 +77,7 @@ $pageTitle = 'User Activity';
         </div>
 
         <div class="flex gap-2">
-            <a href="index.php?page=user_activity" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Clear Filters</a>
+            <a href="index?page=user_activity" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Clear Filters</a>
         </div>
     </form>
 </div>
@@ -134,7 +133,7 @@ function applyFilters() {
     const form = document.getElementById('filterForm');
     const formData = new FormData(form);
     const params = new URLSearchParams(formData);
-    const url = 'index.php?' + params.toString();
+    const url = 'index?' + params.toString();
 
     // Update URL without reload
     window.history.replaceState({}, '', url);

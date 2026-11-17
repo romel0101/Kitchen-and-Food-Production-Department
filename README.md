@@ -30,3 +30,9 @@ Run once each, in this order, only if you have not run them yet:
 Insert one row in `orders` (unique `order_number`; leave `created_at` and `ready_at` alone) and one row per dish in
 `order_items` (`order_id`, `menu_item_id`, `item_name`, `current_stock` = number of portions) in ONE transaction.
 The queue is first come, first served on `created_at`.
+
+## Error pages (403 / 404)
+* Wrong `?page=` name -> 404 page inside the app. A role without permission for a page -> 403 page inside the app.
+* Wrong URL or file path, direct requests to `config/`, `includes/`, `sections/`, `database/`, hidden files, `.sql`/`.log`/`.md`/`.zip`/`.rar`
+  files and folders without an index page -> standalone `error.php` (no login needed), set up in `.htaccess`.
+* Opening a `sections/*.php` file directly -> 403 (`error.php`).

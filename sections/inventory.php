@@ -1,5 +1,5 @@
 <?php
-if (!defined('KAFPD_APP')) { http_response_code(403); exit('Open this page through index.php.'); }
+if (!defined('KAFPD_APP')) { define('ERROR_CODE', 403); require __DIR__ . '/../error.php'; exit; }
 require_perm('inventory');
 
 $action = $_GET['action'] ?? 'list';
@@ -25,7 +25,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $sku       = trim($_POST['sku'] ?? '') ?: null;
                 $unit      = unit_label($_POST['unit'] ?? 'kg');
                 $reorder   = filter_var($_POST['reorder_level'] ?? 0, FILTER_VALIDATE_FLOAT);
-                $alertDays = filter_var($_POST['expiry_alert_days'] ?? 3, FILTER_VALIDATE_INT) ?: 3;
 
                 // Category Logic
                 $catSelect = trim($_POST['category_select'] ?? '');
@@ -48,20 +47,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     break;
                 }
 
-                $pdo->prepare('INSERT INTO ingredients (name, sku, category, unit, reorder_level, expiry_alert_days, storage_location)
-                               VALUES (:name, :sku, :cat, :unit, :reorder, :alert, :storage)')
+                $pdo->prepare('INSERT INTO ingredients (name, sku, category, unit, reorder_level, storage_location)
+                               VALUES (:name, :sku, :cat, :unit, :reorder, :storage)')
                     ->execute([
                         ':name'    => $name,
                         ':sku'     => $sku,
                         ':cat'     => $category,
                         ':unit'    => $unit,
                         ':reorder' => round($reorder, 3),
-                        ':alert'   => $alertDays,
                         ':storage' => $storageLoc
                     ]);
                 log_activity('create', "Added ingredient: $name (unit: $unit, category: $category, reorder: $reorder)");
                 flash('success', "$name added successfully.");
-                redirect('index.php?page=inventory');
+                redirect('index?page=inventory');
                 break;
 
             case 'edit_ingredient':
@@ -70,7 +68,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $sku       = trim($_POST['sku'] ?? '') ?: null;
                 $unit      = unit_label($_POST['unit'] ?? 'kg');
                 $reorder   = filter_var($_POST['reorder_level'] ?? 0, FILTER_VALIDATE_FLOAT);
-                $alertDays = filter_var($_POST['expiry_alert_days'] ?? 3, FILTER_VALIDATE_INT) ?: 3;
 
                 // Category Logic
                 $catSelect = trim($_POST['category_select'] ?? '');
@@ -102,20 +99,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     break;
                 }
 
-                $pdo->prepare('UPDATE ingredients SET name = :name, sku = :sku, category = :cat, unit = :unit, reorder_level = :reorder, expiry_alert_days = :alert, storage_location = :storage WHERE id = :id')
+                $pdo->prepare('UPDATE ingredients SET name = :name, sku = :sku, category = :cat, unit = :unit, reorder_level = :reorder, storage_location = :storage WHERE id = :id')
                     ->execute([
                         ':name'    => $name,
                         ':sku'     => $sku,
                         ':cat'     => $category,
                         ':unit'    => $unit,
                         ':reorder' => round($reorder, 3),
-                        ':alert'   => $alertDays,
                         ':storage' => $storageLoc,
                         ':id'      => $id
                     ]);
                 log_activity('update', "Updated ingredient: $name (ID: $id)");
                 flash('success', "$name updated successfully.");
-                redirect('index.php?page=inventory');
+                redirect('index?page=inventory');
                 break;
 
             case 'delete_ingredient':
@@ -128,7 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $hash = $u->fetchColumn();
                     if (!$hash || !password_verify($pwd, $hash)) {
                         flash('error', 'Incorrect password. Deletion cancelled.');
-                        redirect('index.php?page=inventory');
+                        redirect('index?page=inventory');
                     }
                 }
 
@@ -169,7 +165,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     log_activity('delete', "Deleted ingredient: {$ing['name']} (ID: $id)");
                     flash('success', $ing['name'] . ' deleted successfully.');
                 }
-                redirect('index.php?page=inventory');
+                redirect('index?page=inventory');
                 break;
 
             default:
@@ -179,33 +175,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         error_log($ex->getMessage());
         flash('error', 'Could not save. An ingredient with that name or SKU may already exist.');
     }
-    // Post/redirect/get: a failed save returns to the same screen (add, edit or list) and a refresh will not re-post.
-    redirect('index.php?' . http_build_query(array_intersect_key($_GET, array_flip(['page', 'action', 'id']))));
+    redirect('index?' . http_build_query(array_intersect_key($_GET, array_flip(['page', 'action', 'id']))));
 }
 
 // Compute Dashboard Metrics using current_stock and active ingredients
 $totalIngredients = (int) $pdo->query('SELECT COUNT(*) FROM ingredients WHERE is_active = 1 AND deleted_at IS NULL')->fetchColumn();
 $lowStockCount    = (int) $pdo->query('SELECT COUNT(*) FROM ingredients WHERE is_active = 1 AND deleted_at IS NULL AND current_stock <= reorder_level AND current_stock > 0')->fetchColumn();
 $outOfStockCount  = (int) $pdo->query('SELECT COUNT(*) FROM ingredients WHERE is_active = 1 AND deleted_at IS NULL AND current_stock <= 0')->fetchColumn();
-$expiringCount    = (int) $pdo->query('SELECT COUNT(DISTINCT r.ingredient_id) FROM stock_receipts r JOIN ingredients i ON i.id = r.ingredient_id WHERE i.is_active = 1 AND i.deleted_at IS NULL AND r.quantity_remaining > 0 AND r.expiry_date IS NOT NULL AND r.expiry_date <= DATE_ADD(CURDATE(), INTERVAL i.expiry_alert_days DAY)')->fetchColumn();
 
-// Fetch distinct categories and storages for the dropdowns
+// Fetch distinct categories and storages for dropdowns
 $categories = $pdo->query('SELECT DISTINCT category FROM ingredients WHERE is_active = 1 AND deleted_at IS NULL AND category IS NOT NULL ORDER BY category')->fetchAll(PDO::FETCH_COLUMN);
 $storages   = $pdo->query('SELECT DISTINCT storage_location FROM ingredients WHERE is_active = 1 AND deleted_at IS NULL AND storage_location IS NOT NULL AND CHAR_LENGTH(storage_location) > 0 ORDER BY storage_location')->fetchAll(PDO::FETCH_COLUMN);
 
-// Filtering & Search
+// Filtering, Search, Sorting & Pagination Parameters
 $q           = trim($_GET['q'] ?? '');
 $catFilter   = trim($_GET['category'] ?? 'All');
 $stockFilter = trim($_GET['stock_status'] ?? 'All');
+$sortBy      = trim($_GET['sort'] ?? 'name');
+$sortDir     = strtolower(trim($_GET['dir'] ?? 'asc')) === 'desc' ? 'DESC' : 'ASC';
+$pageNumber  = max(1, (int)($_GET['p'] ?? 1));
+$limit       = 25;
+$offset      = ($pageNumber - 1) * $limit;
 
-$sql = 'SELECT * FROM ingredients WHERE is_active = 1 AND deleted_at IS NULL';
+// Allowed sorting columns mapping
+$allowedSorts = [
+    'name'     => 'i.name',
+    'category' => 'i.category',
+    'stock'    => 'i.current_stock',
+    'reorder'  => 'i.reorder_level'
+];
+$sqlSortCol = $allowedSorts[$sortBy] ?? 'i.name';
+
+// Base WHERE clause setup
+$whereSql = 'WHERE i.is_active = 1 AND i.deleted_at IS NULL';
 $params = [];
 
 if ($q !== '') {
-    // One placeholder per use: with real prepared statements a named parameter may appear only once.
-    // % and _ typed by the user are escaped so they match literally.
     $like = '%' . addcslashes($q, '\\%_') . '%';
-    $sql .= ' AND (name LIKE :q1 OR sku LIKE :q2 OR category LIKE :q3)';
+    $whereSql .= ' AND (i.name LIKE :q1 OR i.sku LIKE :q2 OR i.category LIKE :q3)';
     $params[':q1'] = $like;
     $params[':q2'] = $like;
     $params[':q3'] = $like;
@@ -213,22 +220,78 @@ if ($q !== '') {
 
 if (!in_array($stockFilter, ['All', 'Low', 'Out', 'OK'], true)) $stockFilter = 'All';
 if ($catFilter !== 'All') {
-    $sql .= ' AND category = :cat';
+    $whereSql .= ' AND i.category = :cat';
     $params[':cat'] = $catFilter;
 }
 
 if ($stockFilter === 'Low') {
-    $sql .= ' AND current_stock <= reorder_level AND current_stock > 0';
+    $whereSql .= ' AND i.current_stock <= i.reorder_level AND i.current_stock > 0';
 } elseif ($stockFilter === 'Out') {
-    $sql .= ' AND current_stock <= 0';
+    $whereSql .= ' AND i.current_stock <= 0';
 } elseif ($stockFilter === 'OK') {
-    $sql .= ' AND current_stock > reorder_level';
+    $whereSql .= ' AND i.current_stock > i.reorder_level';
 }
 
-$sql .= ' ORDER BY name ASC';
-$stmt = $pdo->prepare($sql);
-$stmt->execute($params);
+// Total count matching filters for pagination
+$countStmt = $pdo->prepare("SELECT COUNT(*) FROM ingredients i $whereSql");
+$countStmt->execute($params);
+$totalFilteredRows = (int) $countStmt->fetchColumn();
+$totalPages = max(1, (int) ceil($totalFilteredRows / $limit));
+$pageNumber = min($pageNumber, $totalPages);          // a stale ?p= after the filter shrank the list: show the last page, not an empty one
+$offset     = ($pageNumber - 1) * $limit;
+
+// Fetch paginated dataset along with subqueries checking for expired batches or batches expiring soon
+$dataSql = "SELECT i.*, 
+                   (SELECT COUNT(*) FROM stock_receipts r WHERE r.ingredient_id = i.id AND r.quantity_remaining > 0 AND r.expiry_date < CURDATE()) AS expired_batches_count,
+                   (SELECT COUNT(*) FROM stock_receipts r WHERE r.ingredient_id = i.id AND r.quantity_remaining > 0 AND r.expiry_date = CURDATE()) AS expires_today_count,
+                   (SELECT COUNT(*) FROM stock_receipts r WHERE r.ingredient_id = i.id AND r.quantity_remaining > 0 AND r.expiry_date > CURDATE() AND r.expiry_date <= DATE_ADD(CURDATE(), INTERVAL " . (int)EXPIRY_WARN_DAYS . " DAY)) AS expiring_soon_count
+            FROM ingredients i 
+            $whereSql 
+            ORDER BY $sqlSortCol $sortDir, i.name ASC 
+            LIMIT :limit OFFSET :offset";
+$stmt = $pdo->prepare($dataSql);
+foreach ($params as $key => $val) {
+    $stmt->bindValue($key, $val);
+}
+$stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+$stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+$stmt->execute();
 $rows = $stmt->fetchAll();
+
+// Fetch ALL matching rows for print report (ignoring pagination limits)
+$printSql = "SELECT i.*, 
+                    (SELECT COUNT(*) FROM stock_receipts r WHERE r.ingredient_id = i.id AND r.quantity_remaining > 0 AND r.expiry_date < CURDATE()) AS expired_batches_count,
+                    (SELECT COUNT(*) FROM stock_receipts r WHERE r.ingredient_id = i.id AND r.quantity_remaining > 0 AND r.expiry_date = CURDATE()) AS expires_today_count,
+                    (SELECT COUNT(*) FROM stock_receipts r WHERE r.ingredient_id = i.id AND r.quantity_remaining > 0 AND r.expiry_date > CURDATE() AND r.expiry_date <= DATE_ADD(CURDATE(), INTERVAL " . (int)EXPIRY_WARN_DAYS . " DAY)) AS expiring_soon_count
+             FROM ingredients i 
+             $whereSql 
+             ORDER BY $sqlSortCol $sortDir, i.name ASC";
+$printStmt = $pdo->prepare($printSql);
+foreach ($params as $key => $val) {
+    $printStmt->bindValue($key, $val);
+}
+$printStmt->execute();
+$printRows = $printStmt->fetchAll();
+
+// Helper builder function for table header sorting URLs
+function sort_url(string $col): string {
+    $params = $_GET;
+    $currentSort = $_GET['sort'] ?? 'name';
+    $currentDir  = strtolower($_GET['dir'] ?? 'asc');
+    
+    $nextDir = ($currentSort === $col && $currentDir === 'asc') ? 'desc' : 'asc';
+    $params['sort'] = $col;
+    $params['dir']  = $nextDir;
+    unset($params['p']); // Reset to page 1 on sort change
+    return 'index?' . http_build_query($params);
+}
+
+// Helper builder function for pagination URLs
+function page_url(int $p): string {
+    $params = $_GET;
+    $params['p'] = $p;
+    return 'index?' . http_build_query($params);
+}
 
 $pageTitle = 'Inventory';
 ?>
@@ -268,7 +331,7 @@ $pageTitle = 'Inventory';
                 </div>
             </div>
 
-            <div class="grid gap-6 sm:grid-cols-3">
+            <div class="grid gap-6 sm:grid-cols-2">
                 <div>
                     <label class="block text-sm font-medium text-slate-700">Unit</label>
                     <select name="unit" class="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 shadow-sm">
@@ -283,11 +346,7 @@ $pageTitle = 'Inventory';
                 </div>
             </div>
 
-            <div class="grid gap-6 sm:grid-cols-2">
-                <div>
-                    <label class="block text-sm font-medium text-slate-700">Warn before expiry (days)</label>
-                    <input type="number" name="expiry_alert_days" min="1" value="3" class="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 shadow-sm">
-                </div>
+            <div class="sm:grid-cols-2">
                 <div>
                     <label class="block text-sm font-medium text-slate-700">Usual storage</label>
                     <?php $hasStorages = !empty($storages); ?>
@@ -305,7 +364,7 @@ $pageTitle = 'Inventory';
             </div>
 
             <div class="flex items-center justify-end gap-3 border-t border-slate-200 pt-4">
-                <a href="index.php?page=inventory" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</a>
+                <a href="index?page=inventory" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</a>
                 <button class="rounded-md bg-slate-900 px-6 py-2 text-sm font-semibold text-white hover:bg-slate-800">Add ingredient</button>
             </div>
         </form>
@@ -320,7 +379,7 @@ $pageTitle = 'Inventory';
         $itemToEdit = $editStmt->fetch();
         if (!$itemToEdit) {
             flash('error', 'Ingredient not found.');
-            redirect('index.php?page=inventory');
+            redirect('index?page=inventory');
         }
         $pageTitle = 'Edit Ingredient: ' . $itemToEdit['name'];
     ?>
@@ -383,10 +442,6 @@ $pageTitle = 'Inventory';
 
             <div class="grid gap-6 sm:grid-cols-2">
                 <div>
-                    <label class="block text-sm font-medium text-slate-700">Warn before expiry (days)</label>
-                    <input type="number" name="expiry_alert_days" value="<?= (int)$itemToEdit['expiry_alert_days'] ?>" min="1" class="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 shadow-sm">
-                </div>
-                <div>
                     <label class="block text-sm font-medium text-slate-700">Usual storage</label>
                     <select name="storage_select" onchange="const inp = document.getElementById('edit_storage_input'); if(this.value === '__NEW__'){ inp.classList.remove('hidden'); inp.disabled = false; inp.focus(); } else { inp.classList.add('hidden'); inp.disabled = true; }" class="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 shadow-sm">
                         <?php 
@@ -407,7 +462,7 @@ $pageTitle = 'Inventory';
             </div>
 
             <div class="flex items-center justify-end gap-3 border-t border-slate-200 pt-4">
-                <a href="index.php?page=inventory" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</a>
+                <a href="index?page=inventory" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</a>
                 <button class="rounded-md bg-slate-900 px-6 py-2 text-sm font-semibold text-white hover:bg-slate-800">Save changes</button>
             </div>
         </form>
@@ -417,7 +472,7 @@ $pageTitle = 'Inventory';
     <!-- MAIN INVENTORY LIST VIEW -->
     
     <!-- Top Stat Cards -->
-    <div class="grid grid-cols-2 gap-4 sm:grid-cols-4 mb-6">
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-3 mb-6 print:hidden">
         <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
             <p class="text-xs font-bold uppercase tracking-wider text-slate-500">Ingredients</p>
             <p class="mt-1 text-3xl font-black text-slate-900"><?= $totalIngredients ?></p>
@@ -430,75 +485,99 @@ $pageTitle = 'Inventory';
             <p class="text-xs font-bold uppercase tracking-wider text-red-700">Out of Stock</p>
             <p class="mt-1 text-3xl font-black text-red-900"><?= $outOfStockCount ?></p>
         </div>
-        <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <p class="text-xs font-bold uppercase tracking-wider text-slate-500">Expired / Expiring</p>
-            <p class="mt-1 text-3xl font-black text-slate-900"><?= $expiringCount ?></p>
-        </div>
     </div>
 
     <!-- Search & Filter Bar -->
-    <form id="filterForm" method="GET" class="mb-6 rounded-lg border border-slate-200 bg-white p-4 shadow-sm flex flex-wrap items-end gap-4">
+    <form id="filterForm" method="GET" data-live="#invResults" class="mb-6 rounded-lg border border-slate-200 bg-white p-4 shadow-sm flex flex-wrap items-end gap-4 print:hidden">
         <input type="hidden" name="page" value="inventory">
+        <?php if (!empty($sortBy)): ?><input type="hidden" name="sort" value="<?= e($sortBy) ?>"><?php endif; ?>
+        <?php if (!empty($sortDir)): ?><input type="hidden" name="dir" value="<?= e(strtolower($sortDir)) ?>"><?php endif; ?>
         
-        <div class="flex-1 min-w-[220px]">
-            <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Search</label>
-            <input type="search" name="q" id="searchInput" value="<?= e($q) ?>" placeholder="Name, SKU or category..." oninput="debounceSubmit()" autocomplete="off" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-orange-500 focus:ring-orange-500">
-        </div>
+        <div class="w-full flex flex-col md:flex-row gap-3">
+            <div class="flex-1 min-w-[220px]">
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Search</label>
+                <input type="search" name="q" id="searchInput" value="<?= e($q) ?>" placeholder="Name, SKU or category..." autocomplete="off" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-orange-500 focus:ring-orange-500">
+            </div>
 
-        <div class="w-40">
-            <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Category</label>
-            <select name="category" onchange="document.getElementById('filterForm').submit()" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm">
-                <option value="All">All Categories</option>
-                <?php foreach ($categories as $cat): ?>
-                    <option value="<?= e($cat) ?>" <?= $catFilter === $cat ? 'selected' : '' ?>><?= e($cat) ?></option>
-                <?php endforeach; ?>
-            </select>
-        </div>
+            <div class="w-full md:w-auto lg:w-40">
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Category</label>
+                <select name="category" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm">
+                    <option value="All">All Categories</option>
+                    <?php foreach ($categories as $cat): ?>
+                        <option value="<?= e($cat) ?>" <?= $catFilter === $cat ? 'selected' : '' ?>><?= e($cat) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
 
-        <div class="w-40">
-            <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Stock</label>
-            <select name="stock_status" onchange="document.getElementById('filterForm').submit()" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm">
-                <option value="All">All Status</option>
-                <option value="Low" <?= $stockFilter === 'Low' ? 'selected' : '' ?>>Low stock</option>
-                <option value="Out" <?= $stockFilter === 'Out' ? 'selected' : '' ?>>Out of stock</option>
-                <option value="OK" <?= $stockFilter === 'OK' ? 'selected' : '' ?>>OK</option>
-            </select>
-        </div>
+            <div class="w-full md:w-auto lg:w-40">
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Stock</label>
+                <select name="stock_status" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm">
+                    <option value="All">All Status</option>
+                    <option value="Low" <?= $stockFilter === 'Low' ? 'selected' : '' ?>>Low stock</option>
+                    <option value="Out" <?= $stockFilter === 'Out' ? 'selected' : '' ?>>Out of stock</option>
+                    <option value="OK" <?= $stockFilter === 'OK' ? 'selected' : '' ?>>OK</option>
+                </select>
+            </div>
 
-        <div class="flex gap-2">
-            <button class="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">Search</button>
-            <?php if ($q !== '' || $catFilter !== 'All' || $stockFilter !== 'All'): ?>
-                <a href="index.php?page=inventory" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Clear</a>
-            <?php endif; ?>
+            <div class="flex items-end gap-2">
+                <a href="index?page=inventory" class="w-full md:w-auto lg:w-52 h-10 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Clear</a>
+            </div>
         </div>
     </form>
 
     <!-- Ingredients Table Section -->
-    <div class="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
+    <div id="invResults" class="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
             <div>
-                <h2 class="font-bold text-slate-900 uppercase tracking-wide text-sm">All Ingredients</h2>
-                <p class="text-xs text-slate-500"><?= count($rows) ?> total</p>
+                <h2 class="font-bold text-slate-900 uppercase tracking-wide text-sm">Inventory Stock</h2>
+                <p class="text-xs text-slate-500 hidden print:block">Full Inventory Report — Total <?= count($printRows) ?> items matching current filters</p>
             </div>
-            <a href="index.php?page=inventory&action=new" class="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 transition-colors shadow-sm">+ New Ingredient</a>
+            <div class="flex gap-5">
+                <button type="button" onclick="window.print()" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 print:hidden flex items-center gap-1.5 shadow-sm">
+                    <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+                    Print Full Report
+                </button>
+                <a href="index?page=inventory&action=new" class="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 transition-colors shadow-sm print:hidden">+ New Ingredient</a>
+            </div>
         </div>
 
         <div class="overflow-x-auto">
-            <table class="w-full text-left text-sm">
+            <!-- Screen View Table (Paginated) -->
+            <table class="w-full text-left text-sm print:hidden">
                 <thead class="border-b border-slate-200 bg-slate-50/70 text-xs font-bold uppercase tracking-wider text-slate-500">
                     <tr>
-                        <th class="px-6 py-3">Ingredient</th>
-                        <th class="px-6 py-3">Category</th>
-                        <th class="px-6 py-3">On Hand</th>
-                        <th class="px-6 py-3">Reorder At</th>
-                        <th class="px-6 py-3">Status</th>
-                        <th class="px-6 py-3 text-right">Action</th>
+                        <th class="px-6 py-3 w-[16%]">
+                            <a href="<?= sort_url('name') ?>" class="group inline-flex items-center gap-1 hover:text-slate-900">
+                                Ingredient
+                                <span class="text-slate-400 group-hover:text-slate-600"><?= $sortBy === 'name' ? ($sortDir === 'ASC' ? '▲' : '▼') : '↕' ?></span>
+                            </a>
+                        </th>
+                        <th class="px-6 py-3 w-[16%]">
+                            <a href="<?= sort_url('category') ?>" class="group inline-flex items-center gap-1 hover:text-slate-900">
+                                Category
+                                <span class="text-slate-400 group-hover:text-slate-600"><?= $sortBy === 'category' ? ($sortDir === 'ASC' ? '▲' : '▼') : '↕' ?></span>
+                            </a>
+                        </th>
+                        <th class="px-6 py-3 w-[16%]">
+                            <a href="<?= sort_url('stock') ?>" class="group inline-flex items-center gap-1 hover:text-slate-900">
+                                On Hand
+                                <span class="text-slate-400 group-hover:text-slate-600"><?= $sortBy === 'stock' ? ($sortDir === 'ASC' ? '▲' : '▼') : '↕' ?></span>
+                            </a>
+                        </th>
+                        <th class="px-6 py-3 w-[16%]">
+                            <a href="<?= sort_url('reorder') ?>" class="group inline-flex items-center gap-1 hover:text-slate-900">
+                                Reorder At
+                                <span class="text-slate-400 group-hover:text-slate-600"><?= $sortBy === 'reorder' ? ($sortDir === 'ASC' ? '▲' : '▼') : '↕' ?></span>
+                            </a>
+                        </th>
+                        <th class="px-6 py-3 w-[16%]">Status</th>
+                        <th class="px-6 py-3 w-[16%] print:hidden">Action</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                     <?php foreach ($rows as $r):
-                        $out = (float) $r['current_stock'] <= 0;
-                        $low = (float) $r['current_stock'] <= (float) $r['reorder_level'];
+                        $out   = (float) $r['current_stock'] <= 0;
+                        $low   = (float) $r['current_stock'] <= (float) $r['reorder_level'];
                     ?>
                         <tr class="hover:bg-slate-50/50 transition-colors">
                             <td class="px-6 py-4">
@@ -511,12 +590,14 @@ $pageTitle = 'Inventory';
                             <td class="px-6 py-4 font-black tabular-nums text-slate-900"><?= e(num($r['current_stock'])) ?> <span class="font-normal text-xs text-slate-500"><?= e($r['unit']) ?></span>
                                 <?php if ($alt = alt_unit_text($r['current_stock'], $r['unit'])): ?><span class="block text-xs font-normal text-slate-400"><?= e($alt) ?></span><?php endif; ?></td>
                             <td class="px-6 py-4 tabular-nums text-slate-700"><?= e(num($r['reorder_level'])) ?> <span class="text-xs text-slate-500"><?= e($r['unit']) ?></span></td>
-                            <td class="px-6 py-4">
-                                <?= $out ? badge('Out of stock', 'red') : ($low ? badge('Low', 'amber') : badge('OK', 'green')) ?>
+                            <td class="px-6 py-4 space-y-1">
+                                <div>
+                                    <?= $out ? badge('Out of stock', 'red') : ($low ? badge('Low stock', 'amber') : badge('OK', 'green')) ?>
+                                </div>
                             </td>
-                            <td class="px-6 py-4 text-right space-x-2 whitespace-nowrap">
-                                <a href="index.php?page=receiving&ingredient=<?= (int) $r['id'] ?>" class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors shadow-sm">Receive / Batches</a>
-                                <a href="index.php?page=inventory&action=edit&id=<?= (int) $r['id'] ?>" class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors shadow-sm">Edit</a>
+                            <td class="px-6 py-4 space-x-2 whitespace-nowrap print:hidden">
+                                <a href="index?page=receiving&ingredient=<?= (int) $r['id'] ?>" class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors shadow-sm">Receive / Batches</a>
+                                <a href="index?page=inventory&action=edit&id=<?= (int) $r['id'] ?>" class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors shadow-sm">Edit</a>
                                 <?php if ($_SESSION['role'] === ROLE_ADMIN): ?>
                                     <button type="button" class="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100 transition-colors shadow-sm" onclick="openDeleteModal('<?= e(addslashes($r['name'])) ?>', <?= (int)$r['id'] ?>)">Delete</button>
                                 <?php endif; ?>
@@ -524,153 +605,80 @@ $pageTitle = 'Inventory';
                         </tr>
                     <?php endforeach; ?>
                     <?php if (!$rows): ?>
-                        <tr><td colspan="6" class="px-6 py-12 text-center text-slate-500">No ingredients found matching your filter.</td></tr>
+                        <tr>
+                            <td colspan="6" class="px-4 py-10 text-center text-slate-500">
+                                <?php if ($totalIngredients === 0): ?>
+                                    No ingredients added yet. <a href="index?page=inventory&action=new" class="font-semibold underline text-orange-600">Add your first ingredient</a>
+                                <?php else: ?>
+                                    No ingredients match your current search or filters. <a href="index?page=inventory" class="font-semibold underline">Clear filters</a>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
                     <?php endif; ?>
                 </tbody>
             </table>
+
+            <!-- Print View Table (Unpaginated / Full Report) -->
+            <table class="w-full text-left text-sm hidden print:table">
+                <thead class="border-b border-slate-300 bg-slate-100 text-xs font-bold uppercase tracking-wider text-slate-700">
+                    <tr>
+                        <th class="px-4 py-2">Ingredient / SKU</th>
+                        <th class="px-4 py-2">Category</th>
+                        <th class="px-4 py-2">On Hand</th>
+                        <th class="px-4 py-2">Reorder At</th>
+                        <th class="px-4 py-2">Status & Expiry</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-200">
+                    <?php foreach ($printRows as $pr):
+                        $pOut   = (float) $pr['current_stock'] <= 0;
+                        $pLow   = (float) $pr['current_stock'] <= (float) $pr['reorder_level'];
+                        $pHasExp = (int) $pr['expired_batches_count'] > 0;
+                    ?>
+                        <tr>
+                            <td class="px-4 py-2">
+                                <div class="flex print:flex-col gap-0.5">
+                                    <span class="font-bold text-slate-900"><?= e($pr['name']) ?></span>
+                                    <?php if (!empty($pr['sku'])): ?><span class="text-xs text-slate-500">(SKU: <?= e($pr['sku']) ?>)</span><?php endif; ?>
+                                </div>
+                            </td>
+                            <td class="px-4 py-2 text-slate-700"><?= e($pr['category']) ?></td>
+                            <td class="px-4 py-2 font-bold"><?= e(num($pr['current_stock'])) ?> <?= e($pr['unit']) ?></td>
+                            <td class="px-4 py-2"><?= e(num($pr['reorder_level'])) ?> <?= e($pr['unit']) ?></td>
+                            <td class="px-4 py-2 text-xs">
+                                <?= $pOut ? 'Out of stock' : ($pLow ? 'Low stock' : 'OK') ?>
+                                <?= $pHasExp ? ' — [Has Expired Batches]' : '' ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+
+
+        <div class="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-6 py-3 print:hidden">
+            <div class="text-xs text-slate-500">
+                                <p class="text-xs text-slate-500 print:hidden"><?php if ($totalFilteredRows): ?>Showing <strong><?= $offset + 1 ?>&ndash;<?= $offset + count($rows) ?></strong> of <strong><?= $totalFilteredRows ?></strong> item<?= $totalFilteredRows === 1 ? '' : 's' ?> (page <?= $pageNumber ?> of <?= $totalPages ?>)<?php else: ?>0 items<?php endif; ?></p>
+            </div>
+            <div class="flex items-center gap-1">
+                <?php if ($pageNumber > 1): ?>
+                    <a href="<?= page_url($pageNumber - 1) ?>" class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 shadow-sm">Previous</a>
+                <?php endif; ?>
+                
+                <?php for ($i = 1; $i <= $totalPages; $i++): ?>
+                    <?php if ($i === 1 || $i === $totalPages || abs($i - $pageNumber) <= 2): ?>
+                        <a href="<?= page_url($i) ?>" class="rounded-md px-3 py-1.5 text-xs font-semibold <?= $i === $pageNumber ? 'bg-slate-900 text-white shadow-sm' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 shadow-sm' ?>"><?= $i ?></a>
+                    <?php elseif ($i === $pageNumber - 3 || $i === $pageNumber + 3): ?>
+                        <span class="px-1 text-slate-400">...</span>
+                    <?php endif; ?>
+                <?php endfor; ?>
+
+                <?php if ($pageNumber < $totalPages): ?>
+                    <a href="<?= page_url($pageNumber + 1) ?>" class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 shadow-sm">Next</a>
+                <?php endif; ?>
+            </div>
         </div>
     </div>
 <?php endif; ?>
 
-<script>
-    // Live search: submits 400 ms after you stop typing, then puts the cursor back at the end of the box.
-    let debounceTimer;
-    function debounceSubmit() {
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-            document.getElementById('filterForm').submit();
-        }, 400);
-    }
-    (function () {
-        const box = document.getElementById('searchInput');
-        if (box && box.value !== '' && new URLSearchParams(location.search).has('q')) {
-            box.focus();
-            box.setSelectionRange(box.value.length, box.value.length);
-        }
-    })();
-
-    // Password confirmation modal for delete actions
-    let deleteModalTarget = null;
-    let deleteModalType = null;
-
-    function openDeleteModal(itemName, itemId, type = 'ingredient') {
-        deleteModalTarget = itemId;
-        deleteModalType = type;
-        document.getElementById('deleteModalItemName').textContent = itemName;
-        document.getElementById('deleteModalItemId').value = itemId;
-        document.getElementById('deleteModalType').value = type;
-        document.getElementById('deleteModalPassword').value = '';
-        document.getElementById('deleteModalError').textContent = '';
-        document.getElementById('deleteModal').classList.remove('hidden');
-        document.getElementById('deleteModal').classList.add('flex');
-        setTimeout(() => document.getElementById('deleteModalPassword').focus(), 50);
-    }
-
-    function closeDeleteModal() {
-        document.getElementById('deleteModal').classList.add('hidden');
-        document.getElementById('deleteModal').classList.remove('flex');
-        deleteModalTarget = null;
-        deleteModalType = null;
-    }
-
-    function submitDeleteModal() {
-        const password = document.getElementById('deleteModalPassword').value;
-        const itemId = document.getElementById('deleteModalItemId').value;
-        const type = document.getElementById('deleteModalType').value;
-
-        if (!password) {
-            document.getElementById('deleteModalError').textContent = 'Please enter your password.';
-            return;
-        }
-
-        // Disable button and show loading
-        const btn = document.getElementById('deleteModalConfirmBtn');
-        btn.disabled = true;
-        btn.textContent = 'Verifying...';
-
-        const formData = new FormData();
-        formData.append('csrf', document.querySelector('input[name="csrf"]').value);
-        formData.append('verify_password', password);
-
-        let action = '';
-        if (type === 'ingredient') {
-            action = 'delete_ingredient';
-            formData.append('form_action', action);
-            formData.append('id', itemId);
-        }
-
-        fetch(window.location.href, {
-            method: 'POST',
-            body: formData
-        })
-        .then(response => response.text())
-        .then(html => {
-            // Check if the response indicates success (redirect) or error
-            if (html.includes('flash-success') || html.includes('success') || !html.includes('flash-error')) {
-                // Reload page to show updated list
-                window.location.reload();
-            } else {
-                // Extract error message from response
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(html, 'text/html');
-                const errorEl = doc.querySelector('[role="alert"]');
-                if (errorEl) {
-                    document.getElementById('deleteModalError').textContent = errorEl.textContent.trim();
-                } else {
-                    document.getElementById('deleteModalError').textContent = 'Password verification failed.';
-                }
-                btn.disabled = false;
-                btn.textContent = 'Delete';
-            }
-        })
-        .catch(() => {
-            document.getElementById('deleteModalError').textContent = 'An error occurred. Please try again.';
-            btn.disabled = false;
-            btn.textContent = 'Delete';
-        });
-    }
-
-    // Handle Enter key in password field
-    document.addEventListener('DOMContentLoaded', function() {
-        const passwordInput = document.getElementById('deleteModalPassword');
-        if (passwordInput) {
-            passwordInput.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    submitDeleteModal();
-                }
-            });
-        }
-
-        // Close modal on backdrop click
-        document.getElementById('deleteModal')?.addEventListener('click', function(e) {
-            if (e.target === this) closeDeleteModal();
-        });
-
-        // Close modal on Escape key
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape') closeDeleteModal();
-        });
-    });
-</script>
-
-<!-- Password Confirmation Modal -->
-<div id="deleteModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-    <div class="bg-white rounded-lg shadow-xl max-w-md w-full">
-        <div class="px-6 py-4 border-b border-slate-200">
-            <h3 class="text-lg font-semibold text-slate-900">Confirm Deletion</h3>
-        </div>
-        <div class="px-6 py-4 space-y-4">
-            <p class="text-slate-700">Are you sure you want to delete <strong id="deleteModalItemName"></strong>?</p>
-            <p class="text-xs text-slate-500">This action cannot be undone. Please enter your password to confirm.</p>
-            <input type="password" id="deleteModalPassword" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-orange-500 focus:ring-orange-500" placeholder="Your password" autocomplete="current-password">
-            <input type="hidden" id="deleteModalItemId">
-            <input type="hidden" id="deleteModalType">
-            <p id="deleteModalError" class="text-red-600 text-sm hidden"></p>
-        </div>
-        <div class="px-6 py-4 border-t border-slate-200 flex justify-end gap-3">
-            <button type="button" onclick="closeDeleteModal()" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
-            <button type="button" id="deleteModalConfirmBtn" onclick="submitDeleteModal()" class="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700">Delete</button>
-        </div>
-    </div>
-</div>
+<script src="assets/js/live-filter.js" defer></script>

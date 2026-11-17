@@ -21,13 +21,15 @@ const ROLE_ADMIN     = 'A';
 const ROLE_CHEF      = 'C';
 const ROLE_INVENTORY = 'I';
 
-const ROLE_LABELS = [ROLE_ADMIN => 'Admin', ROLE_CHEF => 'Chef Staff', ROLE_INVENTORY => 'Inventory Staff'];
+const ROLE_LABELS = [ROLE_ADMIN => 'Administrator', ROLE_CHEF => 'Chef Staff', ROLE_INVENTORY => 'Inventory Staff'];
 
 // Access table: change who can use what here and nowhere else.
 // The sidebar, every page guard and every form handler read from this table.
+//   'recipes'      = may OPEN the Recipes and menu availability page (read only).
+//   'recipes_edit' = may also add, edit and delete menu items and recipe lines. Admin only: the chef can read, not change.
 const PERMISSIONS = [
-    ROLE_ADMIN     => ['orders', 'recipes', 'inventory', 'receiving', 'expiry', 'waste', 'safety', 'reports', 'users'],
-    ROLE_CHEF      => ['orders', 'recipes'],
+    ROLE_ADMIN     => ['dashboard', 'orders', 'recipes', 'recipes_edit', 'inventory', 'receiving', 'expiry', 'waste', 'safety', 'reports', 'users'],
+    ROLE_CHEF      => ['dashboard', 'orders', 'recipes'],
     ROLE_INVENTORY => ['dashboard', 'inventory', 'receiving', 'expiry', 'waste', 'safety', 'reports'],
 ];
 
@@ -73,9 +75,10 @@ $_SESSION['csrf'] ??= bin2hex(random_bytes(32));
 function can(string $permission): bool {
     return in_array($permission, PERMISSIONS[$_SESSION['role'] ?? ''] ?? [], true);
 }
+// Thrown by deny(). index.php catches it and shows the 403 page inside the normal layout.
+final class AccessDenied extends Exception {}
 function deny(): never {
-    http_response_code(403);
-    exit('403 Forbidden: your role is not allowed to do this.');
+    throw new AccessDenied('403 Forbidden: your role is not allowed to do this.');
 }
 function require_perm(string $permission): void {
     if (!can($permission)) deny();
